@@ -14,8 +14,8 @@ sudo bash build.sh <xiaomi-stock-ota> <oplus-ota> y local/repo xiaomi-oplus Buil
 The build deliberately keeps Xiaomi vendor/ODM/DLKM partitions, imports OPlus
 system/product/system_ext and merges `my_*` into system. Optional proprietary
 compatibility blobs belong in ignored `assets/local/`; see `assets/README.md`.
-GitHub Actions can download the same archive from the repository secret
-`PORT_ASSETS_URL`, so Telegram users still provide only the two ROM links.
+GitHub Actions downloads the private `assets-v1` release using the repository
+secret `PORT_ASSETS_TOKEN`, so Telegram users still provide only two ROM links.
 
 The GitHub Actions workflow accepts only the two OTA URLs and detects device
 properties plus dynamic partition sizing from the extracted Xiaomi payload.

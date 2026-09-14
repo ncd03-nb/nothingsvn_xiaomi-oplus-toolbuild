@@ -32,7 +32,7 @@ on:
       enable_cryptoeng_hal:
         description: Apply assets/local/femboyAidL
         required: false
-        default: false
+        default: true
         type: boolean
       install_mods:
         description: Compatibility input from the Telegram bot
@@ -61,7 +61,8 @@ jobs:
       TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
       ENABLE_OPLUS_OVERLAYS: ${{ inputs.enable_oplus_overlays }}
       ENABLE_CRYPTOENG_HAL: ${{ inputs.enable_cryptoeng_hal }}
-      PORT_ASSETS_URL: ${{ secrets.PORT_ASSETS_URL }}
+      ENABLE_BLUETOOTH_QTI_FIX: 'true'
+      PORT_ASSETS_TOKEN: ${{ secrets.PORT_ASSETS_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,13 +84,17 @@ jobs:
           sudo chmod -R a+rx bin scripts
 
       - name: Load private compatibility assets
-        if: ${{ env.PORT_ASSETS_URL != '' }}
+        if: ${{ env.PORT_ASSETS_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ env.PORT_ASSETS_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p assets/local .asset-download
-          aria2c --file-allocation=none -x10 -s10 --max-tries=5 \
-            -d .asset-download -o extras.archive "$PORT_ASSETS_URL"
-          7z x -y .asset-download/extras.archive -oassets/local
+          gh release download assets-v1 \
+            --repo ncd03-nb/nothingsvn-oplus-port-assets \
+            --pattern oplus-port-assets.zip \
+            --dir .asset-download
+          7z x -y .asset-download/oplus-port-assets.zip -oassets/local
 
       - name: Notify start
         continue-on-error: true

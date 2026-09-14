@@ -19,6 +19,6 @@ source directory is present. Cryptoeng gets the file context shown in the suppli
 `u:object_r:hal_allocator_default_exec:s0`.
 
 Use `scripts/import-ayugram-assets.ps1` on the reference Windows machine. For
-GitHub Actions, archive the contents of `assets/local/` and set its private URL
-in the repository secret `PORT_ASSETS_URL`; do not commit proprietary blobs to
-a public repository.
+GitHub Actions, attach the archive to the private asset repository's `assets-v1`
+release and set a read token in `PORT_ASSETS_TOKEN`; do not commit proprietary
+blobs to a public repository.

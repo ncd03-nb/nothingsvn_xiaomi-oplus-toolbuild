@@ -48,10 +48,11 @@ Script nhập `femboyAidL`, `overlay`, `system_ext/apex` và thư viện Bluetoo
 `assets/local/` (đã gitignore). Bật từng nhóm bằng biến môi trường workflow.
 Không bật overlay dấu vân tay của model khác nếu chưa kiểm tra resource/density.
 
-Để Actions tự tải blob mà người dùng vẫn chỉ gửi hai link ROM, nén nội dung
-`assets/local/` thành archive, đăng ở kho riêng và khai báo URL bằng repository
-secret `PORT_ASSETS_URL`. Gốc archive phải chứa trực tiếp `femboyAidL/`,
-`overlay/`, `system_ext/` và `vendor/`.
+Actions tải bundle từ release `assets-v1` của repo private
+`ncd03-nb/nothingsvn-oplus-port-assets`. Khai báo token có quyền đọc repo này
+bằng repository secret `PORT_ASSETS_TOKEN`; người dùng Telegram vẫn chỉ cần gửi
+hai link ROM. Gốc archive chứa `femboyAidL/`, `overlay/`, `system_ext/` và
+`vendor/`.
 
 ## GitHub Actions
 
