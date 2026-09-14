@@ -122,6 +122,7 @@ jobs:
 
       - name: Notify success
         if: success()
+        continue-on-error: true
         env:
           NOTIFY_WORKFLOW_CONCLUSION: success
         run: |
@@ -129,6 +130,7 @@ jobs:
 
       - name: Notify failure
         if: failure()
+        continue-on-error: true
         env:
           NOTIFY_WORKFLOW_CONCLUSION: failure
           NOTIFY_ERROR_LOG: build_action.log
@@ -137,6 +139,7 @@ jobs:
 
       - name: Notify cancellation
         if: cancelled()
+        continue-on-error: true
         env:
           NOTIFY_WORKFLOW_CONCLUSION: cancelled
         run: |
