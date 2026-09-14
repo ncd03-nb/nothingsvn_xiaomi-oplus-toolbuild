@@ -1,0 +1,22 @@
+name: Verify private assets
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PORT_ASSETS_TOKEN }}
+    steps:
+      - name: Verify private release access
+        run: |
+          set -euo pipefail
+          gh release view assets-v1 \
+            --repo ncd03-nb/nothingsvn-oplus-port-assets \
+            --json assets \
+            --jq '.assets[] | select(.name == "oplus-port-assets.zip") | .name' \
+            | grep -Fx oplus-port-assets.zip
