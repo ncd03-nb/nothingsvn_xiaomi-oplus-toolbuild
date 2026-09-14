@@ -64,9 +64,6 @@ jobs:
       ENABLE_BLUETOOTH_QTI_FIX: 'true'
       PORT_ASSETS_TOKEN: ${{ secrets.PORT_ASSETS_TOKEN }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Reclaim runner disk
         uses: easimon/maximize-build-space@v10
         with:
@@ -76,9 +73,17 @@ jobs:
           remove-dotnet: 'true'
           remove-haskell: 'true'
 
+      # maximize-build-space may recreate/move the runner workspace. Checkout
+      # afterwards so setup.sh, notify.py and the rest of the source remain in
+      # GITHUB_WORKSPACE for every subsequent step.
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Install build dependencies
         run: |
           set -euo pipefail
+          test -f setup.sh
+          test -f notify.py
           sudo bash setup.sh
           python3 -m pip install --disable-pip-version-check requests
           sudo chmod -R a+rx bin scripts
