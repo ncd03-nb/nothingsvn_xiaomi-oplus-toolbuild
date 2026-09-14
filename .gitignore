@@ -1,0 +1,16 @@
+/.codex_artifacts
+/build/
+/downloads/
+/out/
+/assets/local/
+/bin/apktool/
+/bin/modfile/
+/bin/package/
+/.env
+*.log
+*.zip
+*.img
+*.bin
+*.payload
+bot/*.db
+__pycache__/

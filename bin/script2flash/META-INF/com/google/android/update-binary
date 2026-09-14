@@ -1,0 +1,63 @@
+#!/sbin/sh
+set -e
+
+ZIP=$3
+OUTFD=/proc/self/fd/$2
+TEMP_DIR=/tmp/nothingsvn-port
+
+ui_print() {
+    printf 'ui_print %s\nui_print\n' "$1" > "$OUTFD"
+}
+
+rm -rf "$TEMP_DIR"
+mkdir -p "$TEMP_DIR/bin"
+unzip "$ZIP" 'META-INF/bin/*' -d "$TEMP_DIR"
+unzip "$ZIP" META-INF/Data/A -d "$TEMP_DIR"
+unzip "$ZIP" META-INF/Data/CNAME -d "$TEMP_DIR"
+chmod -R 0755 "$TEMP_DIR"
+partition_path=/dev/block/bootdevice/by-name
+[ -d "$partition_path" ] || partition_path=/dev/block/by-name
+structure=$(cat "$TEMP_DIR/META-INF/Data/A")
+codename=$(cat "$TEMP_DIR/META-INF/Data/CNAME")
+export PATH="$TEMP_DIR/META-INF/bin:$PATH"
+
+ui_print '> Checking device...'
+device=$(getprop ro.product.device)
+vendor_device=$(getprop ro.product.vendor.device)
+odm_device=$(getprop ro.product.odm.device)
+if [ "$device" != "$codename" ] && [ "$vendor_device" != "$codename" ] && [ "$odm_device" != "$codename" ]; then
+    ui_print "Wrong device: expected $codename, found ${device:-unknown}"
+    exit 1
+fi
+
+ui_print '> Starting installation...'
+ui_print '----- Flashing firmware -----'
+
+7zz l -ba "$ZIP" | while IFS= read -r line; do
+    image_file=${line##* }
+    case "$image_file" in
+        images/*.img)
+            filename=${image_file##*/}
+            partition=${filename%.img}
+            if [ "$partition" = cust ]; then
+                ui_print "> Flashing $partition"
+                unzip -p "$ZIP" "$image_file" > "$partition_path/cust"
+            elif [ "$structure" = VAB ]; then
+                ui_print "> Flashing ${partition}_a and ${partition}_b"
+                unzip -p "$ZIP" "$image_file" > "$partition_path/${partition}_a"
+                unzip -p "$ZIP" "$image_file" > "$partition_path/${partition}_b"
+            else
+                ui_print "> Flashing $partition"
+                unzip -p "$ZIP" "$image_file" > "$partition_path/$partition"
+            fi
+            ;;
+    esac
+done
+
+ui_print '----- Flashing super -----'
+unzip -p "$ZIP" super/super.img > "$partition_path/super"
+
+rm -rf /data/dalvik-cache/arm /data/dalvik-cache/arm64
+ui_print '----- Install success -----'
+ui_print 'Format data if the ROM does not boot.'
+exit 0

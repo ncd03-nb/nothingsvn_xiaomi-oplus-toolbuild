@@ -1,0 +1,143 @@
+name: Xiaomi OPlus ROM Port
+run-name: ${{ inputs.request_id || format('xiaomi-oplus-{0}', github.run_number) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_url:
+        description: Xiaomi stock/AOSP OTA URL for the target device
+        required: true
+        type: string
+      portrom_url:
+        description: OPlus/ColorOS/OxygenOS payload OTA URL
+        required: true
+        type: string
+      request_id:
+        description: Correlation ID supplied by the Telegram bot
+        required: false
+        type: string
+      builder_name:
+        description: Telegram display name
+        required: false
+        type: string
+      builder_id:
+        description: Telegram user ID
+        required: false
+        type: string
+      enable_oplus_overlays:
+        description: Apply assets/local/overlay
+        required: false
+        default: false
+        type: boolean
+      enable_cryptoeng_hal:
+        description: Apply assets/local/femboyAidL
+        required: false
+        default: false
+        type: boolean
+      install_mods:
+        description: Compatibility input from the Telegram bot
+        required: false
+        default: false
+        type: boolean
+      install_toolbox:
+        description: Compatibility input from the Telegram bot
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xiaomi-oplus-${{ inputs.request_id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+      ENABLE_OPLUS_OVERLAYS: ${{ inputs.enable_oplus_overlays }}
+      ENABLE_CRYPTOENG_HAL: ${{ inputs.enable_cryptoeng_hal }}
+      PORT_ASSETS_URL: ${{ secrets.PORT_ASSETS_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reclaim runner disk
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: 1024
+          swap-size-mb: 2048
+          remove-android: 'true'
+          remove-dotnet: 'true'
+          remove-haskell: 'true'
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo bash setup.sh
+          python3 -m pip install --disable-pip-version-check requests
+          sudo chmod -R a+rx bin scripts
+
+      - name: Load private compatibility assets
+        if: ${{ env.PORT_ASSETS_URL != '' }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets/local .asset-download
+          aria2c --file-allocation=none -x10 -s10 --max-tries=5 \
+            -d .asset-download -o extras.archive "$PORT_ASSETS_URL"
+          7z x -y .asset-download/extras.archive -oassets/local
+
+      - name: Notify start
+        continue-on-error: true
+        run: |
+          python3 notify.py start "${{ github.repository }}" "${{ inputs.input_url }}" "xiaomi-oplus" "${{ inputs.builder_name }}" "${{ inputs.builder_id }}"
+
+      - name: Compose OPlus port
+        run: |
+          set -euo pipefail
+          sudo -E bash build.sh \
+            "${{ inputs.input_url }}" \
+            "${{ inputs.portrom_url }}" \
+            n "${{ github.repository }}" xiaomi-oplus \
+            "${{ inputs.builder_name }}" "${{ inputs.builder_id }}" 2>&1 | tee build_action.log
+
+      - name: Pack ROM
+        run: |
+          set -euo pipefail
+          python3 notify.py pack "${{ github.repository }}" "${{ inputs.input_url }}" "xiaomi-oplus" "${{ inputs.builder_name }}" "${{ inputs.builder_id }}" || true
+          sudo -E bash packROM.sh 2>&1 | tee -a build_action.log
+
+      - name: Upload ROM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ColorOS15-xiaomi-${{ github.run_id }}
+          path: out/*.zip
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Notify success
+        if: success()
+        env:
+          NOTIFY_WORKFLOW_CONCLUSION: success
+        run: |
+          python3 notify.py success "${{ github.repository }}" "${{ inputs.input_url }}" "xiaomi-oplus" "${{ inputs.builder_name }}" "${{ inputs.builder_id }}"
+
+      - name: Notify failure
+        if: failure()
+        env:
+          NOTIFY_WORKFLOW_CONCLUSION: failure
+          NOTIFY_ERROR_LOG: build_action.log
+        run: |
+          python3 notify.py fail "${{ github.repository }}" "${{ inputs.input_url }}" "xiaomi-oplus" "${{ inputs.builder_name }}" "${{ inputs.builder_id }}"
+
+      - name: Notify cancellation
+        if: cancelled()
+        env:
+          NOTIFY_WORKFLOW_CONCLUSION: cancelled
+        run: |
+          python3 notify.py cancelled "${{ github.repository }}" "${{ inputs.input_url }}" "xiaomi-oplus" "${{ inputs.builder_name }}" "${{ inputs.builder_id }}"
