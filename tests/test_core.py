@@ -24,9 +24,10 @@ class PropertyEditorTests(unittest.TestCase):
 
 
 class DeviceDetectionTests(unittest.TestCase):
-    def run_detection(self, root: Path, metadata: Path, output: Path) -> dict[str, str]:
-        subprocess.run(
-            [
+    def run_detection(
+        self, root: Path, metadata: Path, output: Path, device_specs: Path | None = None
+    ) -> dict[str, str]:
+        command = [
                 sys.executable,
                 str(ROOT / "scripts" / "detect-device.py"),
                 "--root",
@@ -35,9 +36,10 @@ class DeviceDetectionTests(unittest.TestCase):
                 str(metadata),
                 "--output",
                 str(output),
-            ],
-            check=True,
-        )
+            ]
+        if device_specs:
+            command.extend(("--device-specs", str(device_specs)))
+        subprocess.run(command, check=True)
         return json.loads(output.read_text(encoding="utf-8"))
 
     def test_detects_properties_and_payload_group_size(self) -> None:
@@ -102,6 +104,55 @@ class DeviceDetectionTests(unittest.TestCase):
             detected = self.run_detection(root, metadata, Path(directory) / "device.json")
             self.assertEqual(detected["dynamic_group_size"], "9126805504")
             self.assertEqual(detected["super_size"], str(9_126_805_504 + 256 * 1024 * 1024))
+
+    def test_detects_xiaomi_variant_features_and_catalog_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "images"
+            vendor = root / "vendor"
+            features = root / "product" / "etc" / "device_features"
+            vendor.mkdir(parents=True)
+            features.mkdir(parents=True)
+            (vendor / "build.prop").write_text(
+                "ro.product.vendor.device=marble\n"
+                "ro.product.vendor.model=marble\n"
+                "ro.board.platform=taro\n",
+                encoding="utf-8",
+            )
+            (vendor / "marble_build.prop").write_text(
+                "ro.product.vendor.device=marble\n"
+                "ro.product.vendor.model=23049RAD8C\n"
+                "ro.product.vendor.marketname=Redmi Note 12 Turbo\n",
+                encoding="utf-8",
+            )
+            (features / "marble.xml").write_text(
+                "<!-- camera id 0 set sensor size 64M, camera id 1 set sensor size 16M -->\n"
+                '<string name="battery_capacity_typ">5000</string>\n',
+                encoding="utf-8",
+            )
+            specs = Path(directory) / "specs.json"
+            specs.write_text(
+                json.dumps(
+                    {
+                        "marble": {
+                            "soc_model": "Snapdragon 7+ Gen 2",
+                            "back_camera_mp": "64MP+8MP+2MP",
+                            "screen_size_inches": "6.67",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            metadata = Path(directory) / "missing-payload.json"
+            detected = self.run_detection(
+                root, metadata, Path(directory) / "device.json", device_specs=specs
+            )
+            self.assertEqual(detected["device_model"], "23049RAD8C")
+            self.assertEqual(detected["device_name"], "Redmi Note 12 Turbo")
+            self.assertEqual(detected["soc_model"], "Snapdragon 7+ Gen 2")
+            self.assertEqual(detected["front_camera_mp"], "16MP")
+            self.assertEqual(detected["back_camera_mp"], "64MP+8MP+2MP")
+            self.assertEqual(detected["screen_size_inches"], "6.67")
+            self.assertEqual(detected["battery_capacity_mah"], "5000")
 
 
 if __name__ == "__main__":

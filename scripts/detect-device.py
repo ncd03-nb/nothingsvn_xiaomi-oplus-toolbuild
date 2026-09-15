@@ -21,11 +21,17 @@ PRIORITY_FILES = (
 )
 
 
-def read_props(root: Path) -> dict[str, list[str]]:
+def read_props(root: Path, codename: str = "") -> dict[str, list[str]]:
     paths: list[Path] = []
+    if codename:
+        # Xiaomi ships generic build.prop files plus SKU-specific files such as
+        # marble_build.prop. The latter contain the real model and market name.
+        for candidate in sorted(root.rglob(f"{codename}_build.prop")):
+            if candidate.is_file():
+                paths.append(candidate)
     for relative in PRIORITY_FILES:
         candidate = root / relative
-        if candidate.is_file():
+        if candidate.is_file() and candidate not in paths:
             paths.append(candidate)
     for candidate in sorted(root.rglob("build.prop")):
         if candidate not in paths:
@@ -66,6 +72,52 @@ def normalize_mp(value: str) -> str:
     return f"{match.group(1)}MP" if match else ""
 
 
+def device_feature_files(root: Path, codename: str) -> list[Path]:
+    exact = [path for path in root.rglob(f"{codename}.xml") if "device_features" in str(path).lower()]
+    if exact:
+        return sorted(exact)
+    candidates = [path for path in root.rglob("*.xml") if "device_features" in str(path).lower()]
+    return candidates if len(candidates) == 1 else []
+
+
+def detect_xiaomi_features(root: Path, codename: str) -> dict[str, str]:
+    result = {"front_camera_mp": "", "back_camera_mp": "", "battery_capacity_mah": ""}
+    for path in device_feature_files(root, codename):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        battery = re.search(
+            r'<(?:string|integer)\s+name="battery_capacity(?:_typ)?"\s*>\s*([0-9.]+)',
+            text,
+            re.I,
+        )
+        if battery and not result["battery_capacity_mah"]:
+            result["battery_capacity_mah"] = battery.group(1).split(".", 1)[0]
+
+        # MIUI/HyperOS describes Antutu's physical-camera override either in
+        # a comment or in the adjacent ssize command.
+        sizes = re.search(
+            r"camera\s+id\s*0[^\r\n<]*?([0-9]+(?:\.[0-9]+)?)\s*M"
+            r"[^\r\n<]*camera\s+id\s*1[^\r\n<]*?([0-9]+(?:\.[0-9]+)?)\s*M",
+            text,
+            re.I,
+        )
+        if sizes:
+            result["back_camera_mp"] = normalize_mp(sizes.group(1))
+            result["front_camera_mp"] = normalize_mp(sizes.group(2))
+            continue
+
+        command = re.search(
+            r"0\s*,\s*ssize\s*,\s*(\d+)\s*,\s*(\d+)\s*;\s*1\s*,\s*ssize\s*,\s*(\d+)\s*,\s*(\d+)",
+            text,
+            re.I,
+        )
+        if command:
+            rear_mp = round(int(command.group(1)) * int(command.group(2)) / 1_000_000)
+            front_mp = round(int(command.group(3)) * int(command.group(4)) / 1_000_000)
+            result["back_camera_mp"] = f"{rear_mp}MP"
+            result["front_camera_mp"] = f"{front_mp}MP"
+    return result
+
+
 def detect_battery(root: Path) -> str:
     pattern = re.compile(r'<item\s+name="battery\.capacity"\s*>\s*([0-9.]+)', re.I)
     for path in root.rglob("*.xml"):
@@ -75,6 +127,19 @@ def detect_battery(root: Path) -> str:
         if match:
             return match.group(1).split(".", 1)[0]
     return ""
+
+
+def load_device_spec(path: Path | None, codename: str) -> dict[str, str]:
+    if not path or not path.is_file() or not codename:
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    value = data.get(codename, {}) if isinstance(data, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): str(item) for key, item in value.items() if item is not None}
 
 
 def group_sizes(value: Any) -> list[int]:
@@ -128,6 +193,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--payload-metadata", type=Path)
+    parser.add_argument(
+        "--device-specs",
+        type=Path,
+        default=Path(__file__).resolve().parents[1] / "devices" / "xiaomi.json",
+        help="optional codename catalog for values absent from ROM runtime metadata",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -140,6 +211,7 @@ def main() -> int:
         "ro.build.product",
         "ro.product.system.device",
     ).lower()
+    props = read_props(args.root, codename)
     model = choose(props, "ro.product.vendor.model", "ro.product.odm.model", "ro.product.model")
     market_name = choose(
         props,
@@ -149,13 +221,34 @@ def main() -> int:
         "ro.product.product.marketname",
         "ro.product.model",
     )
-    soc = choose(props, "ro.soc.model", "ro.vendor.soc.model", "ro.board.platform", "ro.hardware", "ro.product.board")
+    explicit_soc = choose(props, "ro.soc.model", "ro.vendor.soc.model")
+    soc = explicit_soc or choose(props, "ro.board.platform", "ro.hardware", "ro.product.board")
     first_api = choose(props, "ro.product.first_api_level", "ro.board.first_api_level")
     android = choose(props, "ro.build.version.release", "ro.system.build.version.release")
     ab_update = choose(props, "ro.build.ab_update")
     front_camera = normalize_mp(find_by_key_pattern(props, ("camera", "front")))
     back_camera = normalize_mp(find_by_key_pattern(props, ("camera", "back")))
     screen_inches = find_by_key_pattern(props, ("screen", "inch"))
+    xiaomi_features = detect_xiaomi_features(args.root, codename)
+    front_camera = front_camera or xiaomi_features["front_camera_mp"]
+    back_camera = back_camera or xiaomi_features["back_camera_mp"]
+    battery_capacity = detect_battery(args.root) or xiaomi_features["battery_capacity_mah"]
+    device_spec = load_device_spec(args.device_specs, codename)
+
+    # Physical marketing specs (especially panel diagonal) are not normally
+    # present in Android runtime properties, so the catalog is the final source.
+    if not model or model.lower() == codename:
+        model = device_spec.get("device_model", "") or model
+    if not market_name or market_name.lower() == codename:
+        market_name = device_spec.get("device_name", "") or market_name
+    if not explicit_soc:
+        soc = device_spec.get("soc_model", "") or soc
+    front_camera = front_camera or device_spec.get("front_camera_mp", "")
+    catalog_back = device_spec.get("back_camera_mp", "")
+    if not back_camera or (catalog_back.count("+") > back_camera.count("+")):
+        back_camera = catalog_back or back_camera
+    screen_inches = screen_inches or device_spec.get("screen_size_inches", "")
+    battery_capacity = battery_capacity or device_spec.get("battery_capacity_mah", "")
     display_density = choose(
         props,
         "ro.sf.lcd_density",
@@ -176,7 +269,7 @@ def main() -> int:
         "back_camera_mp": back_camera,
         "screen_size_inches": screen_inches,
         "display_density": display_density,
-        "battery_capacity_mah": detect_battery(args.root),
+        "battery_capacity_mah": battery_capacity,
         "super_size": super_size,
         "dynamic_group_size": group_size,
     }

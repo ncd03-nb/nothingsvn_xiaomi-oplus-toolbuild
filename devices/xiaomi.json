@@ -1,0 +1,20 @@
+{
+  "marble": {
+    "device_model": "23049RAD8C",
+    "device_name": "Redmi Note 12 Turbo",
+    "soc_model": "Snapdragon 7+ Gen 2",
+    "front_camera_mp": "16MP",
+    "back_camera_mp": "64MP+8MP+2MP",
+    "screen_size_inches": "6.67",
+    "battery_capacity_mah": "5000"
+  },
+  "marblein": {
+    "device_model": "23049PCD8I",
+    "device_name": "POCO F5",
+    "soc_model": "Snapdragon 7+ Gen 2",
+    "front_camera_mp": "16MP",
+    "back_camera_mp": "64MP+8MP+2MP",
+    "screen_size_inches": "6.67",
+    "battery_capacity_mah": "5000"
+  }
+}

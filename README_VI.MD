@@ -75,6 +75,11 @@ trỏ tới repo toolbuild này, sau đó dùng duy nhất hai link:
 /bp <xiaomi_url> -port <oplus_url>
 ```
 
+Metadata thiết bị được lấy theo thứ tự: property trong ROM, file Xiaomi
+`product/etc/device_features/<codename>.xml`, rồi catalog fallback
+`devices/xiaomi.json` cho thông số vật lý không có trong Android (đặc biệt là
+kích thước đường chéo màn hình). Vì vậy lệnh bot vẫn không cần profile thiết bị.
+
 ## Sửa lỗi thực tế đã tích hợp
 
 - SIM 2: đồng bộ `vendor/etc/passwd` và `group` từ OPlus.
