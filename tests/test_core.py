@@ -270,6 +270,30 @@ class DeviceDetectionTests(unittest.TestCase):
             self.assertEqual(detected["base_region"], "China")
             self.assertEqual(detected["soc_id"], "SM7475")
 
+    def test_mayfly_catalog_completes_physical_specs_missing_from_props(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "images"
+            vendor = root / "vendor"
+            vendor.mkdir(parents=True)
+            (vendor / "build.prop").write_text(
+                "ro.product.vendor.device=mayfly\n"
+                "ro.product.vendor.model=2206123SC\n"
+                "ro.product.vendor.marketname=Xiaomi 12S\n"
+                "ro.board.platform=taro\n"
+                "ro.product.first_api_level=31\n",
+                encoding="utf-8",
+            )
+            detected = self.run_detection(
+                root, Path(directory) / "payload.json", Path(directory) / "device.json"
+            )
+            self.assertEqual(detected["soc_model"], "Snapdragon 8+ Gen 1")
+            self.assertEqual(detected["soc_id"], "SM8475")
+            self.assertEqual(detected["front_camera_mp"], "32MP")
+            self.assertEqual(detected["back_camera_mp"], "50MP+13MP+5MP")
+            self.assertEqual(detected["screen_size_inches"], "6.28")
+            self.assertEqual(detected["display_density"], "440")
+            self.assertEqual(detected["battery_capacity_mah"], "4500")
+
 
 if __name__ == "__main__":
     unittest.main()

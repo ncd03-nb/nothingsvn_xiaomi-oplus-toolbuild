@@ -109,14 +109,14 @@ for candidate in system product system_ext vendor; do
         break
     fi
 done
-for part in vendor odm mi_ext; do
+for part in vendor odm mi_ext product; do
     [[ -f "$base_images/$part.img" ]] && extract_image "$base_images/$part.img" "$base_images"
 done
 
-# system/product/system_ext are replaced by OPlus. Device identity, Android
-# version and region come from Xiaomi vendor/ODM and OTA metadata. Avoid the
-# extractor's broken nested-path mode, which reports success without a file.
-rm -f "$base_images/system.img" "$base_images/product.img" "$base_images/system_ext.img"
+# system/system_ext are replaced by OPlus. Xiaomi product is temporarily
+# expanded above because device_features and product properties carry camera,
+# battery and density data that vendor commonly omits.
+rm -f "$base_images/system.img" "$base_images/system_ext.img"
 
 phase "DETECT XIAOMI DEVICE"
 device_json="$WORK_DIR/build/device.json"
@@ -161,6 +161,7 @@ export ENABLE_VNDK_APEX ENABLE_BLUETOOTH_QTI_FIX EXTRAS_DIR
 [[ "$FIRST_API_LEVEL" =~ ^[0-9]+$ ]] || die "Could not detect ro.product.first_api_level from Xiaomi ROM"
 [[ "$SUPER_SIZE" =~ ^[0-9]+$ ]] || die "Could not derive super size from Xiaomi payload dynamic-partition metadata"
 log DETECT "Device=$DEVICE_NAME codename=$DEVICE_CODENAME SoC=${SOC_MODEL:-unknown} first_api=$FIRST_API_LEVEL super=$SUPER_SIZE"
+remove_tree "$base_images/product" "Remove Xiaomi product tree after hardware detection"
 
 # Log the source footprint for diagnosis. The reference marble port retains
 # my_stock and my_product after selective debloating, so capacity is validated

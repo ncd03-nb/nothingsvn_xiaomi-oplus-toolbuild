@@ -326,7 +326,7 @@ def main() -> int:
         "ro.sf.lcd_density",
         "ro.vendor.display.lcd_density",
         "ro.product.display.lcd_density",
-    )
+    ) or device_spec.get("display_density", "")
     super_size, group_size = detect_super_size(args.payload_metadata)
     base_version = xiaomi_version(
         [

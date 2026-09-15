@@ -18,5 +18,16 @@
     "back_camera_mp": "64MP+8MP+2MP",
     "screen_size_inches": "6.67",
     "battery_capacity_mah": "5000"
+  },
+  "mayfly": {
+    "device_model": "2206123SC",
+    "device_name": "Xiaomi 12S",
+    "soc_model": "Snapdragon 8+ Gen 1",
+    "soc_id": "SM8475",
+    "front_camera_mp": "32MP",
+    "back_camera_mp": "50MP+13MP+5MP",
+    "screen_size_inches": "6.28",
+    "display_density": "440",
+    "battery_capacity_mah": "4500"
   }
 }
