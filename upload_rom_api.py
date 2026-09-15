@@ -11,7 +11,9 @@ from google.oauth2 import service_account
 import difflib
 
 # Scopes needed for Drive API (Uploading files)
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
+# Match the credential generated for nothingsvn-rom-bot. The uploader also
+# needs to locate/create nested folders and retire older builds in that folder.
+SCOPES = ['https://www.googleapis.com/auth/drive']
 
 def get_credentials():
     creds = None
