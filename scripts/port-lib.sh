@@ -161,7 +161,7 @@ extract_image() {
             ;;
         erofs)
             run_logged_task UNPACK "$partition.img ($type, $input_size)" "$destination/$partition" \
-                extract.erofs -x -i "$image" -o "$destination" -f -s
+                extract.erofs -x -i "$image" -o "$destination" -f
             ;;
         *) die "Unsupported filesystem for $(basename "$image"): $type" ;;
     esac
@@ -182,7 +182,7 @@ extract_metadata_image() {
     fi
     for target in "$@"; do
         if run_logged_task UNPACK "$partition.img metadata $target" "$destination/$partition" \
-            extract.erofs -i "$image" -o "$destination" -X "$target" -f -s; then
+            extract.erofs -i "$image" -o "$destination" -X "$target" -f; then
             extracted=1
         else
             log WARN "$partition.img does not expose optional metadata path $target"
