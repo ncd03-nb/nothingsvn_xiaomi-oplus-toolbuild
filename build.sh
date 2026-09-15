@@ -80,6 +80,16 @@ if [[ -n "$base_oplus_marker" ]]; then
     die "ROM input roles are reversed: the first URL contains OPlus partition $base_oplus_marker; use Xiaomi first and OPlus after -port"
 fi
 
+# Save the compressed footprint of target-device partitions before their
+# images are expanded and removed.  It is later combined with the OPlus image
+# footprint to decide whether optional stock content can fit in Xiaomi super.
+retained_base_payload_bytes=0
+for part in vendor odm mi_ext odm_dlkm system_dlkm vendor_dlkm product_dlkm; do
+    if [[ -f "$base_images/$part.img" ]]; then
+        retained_base_payload_bytes=$((retained_base_payload_bytes + $(stat -c%s "$base_images/$part.img")))
+    fi
+done
+
 for required_port_part in system product system_ext; do
     [[ -f "$port_images/$required_port_part.img" ]] || die "OPlus payload is missing required partition: $required_port_part"
 done
@@ -145,6 +155,28 @@ export ENABLE_VNDK_APEX ENABLE_BLUETOOTH_QTI_FIX EXTRAS_DIR
 [[ "$FIRST_API_LEVEL" =~ ^[0-9]+$ ]] || die "Could not detect ro.product.first_api_level from Xiaomi ROM"
 [[ "$SUPER_SIZE" =~ ^[0-9]+$ ]] || die "Could not derive super size from Xiaomi payload dynamic-partition metadata"
 log DETECT "Device=$DEVICE_NAME codename=$DEVICE_CODENAME SoC=${SOC_MODEL:-unknown} first_api=$FIRST_API_LEVEL super=$SUPER_SIZE"
+
+# OPlus devices often have a much larger dynamic partition than the Xiaomi
+# target.  my_stock is a large regional/stock-app layer and is not required by
+# the core framework port.  Drop it automatically when the original compressed
+# image footprints would leave less than 5% repack headroom.
+target_group_capacity=$((SUPER_SIZE - 268435456))
+target_pack_budget=$((target_group_capacity * 95 / 100))
+estimated_port_bytes=0
+for part in system product system_ext my_product my_engineering my_stock my_carrier my_region my_bigball my_heytap my_manifest; do
+    [[ -f "$port_images/$part.img" ]] && estimated_port_bytes=$((estimated_port_bytes + $(stat -c%s "$port_images/$part.img")))
+done
+estimated_total_bytes=$((retained_base_payload_bytes + estimated_port_bytes))
+log PORT "Estimated compressed dynamic footprint: $estimated_total_bytes bytes; safe target budget: $target_pack_budget bytes"
+if ((estimated_total_bytes > target_pack_budget)) && [[ -f "$port_images/my_stock.img" ]]; then
+    my_stock_bytes=$(stat -c%s "$port_images/my_stock.img")
+    rm -f "$port_images/my_stock.img"
+    estimated_total_bytes=$((estimated_total_bytes - my_stock_bytes))
+    log WARN "Omitting optional OPlus my_stock ($my_stock_bytes bytes) to fit target super"
+fi
+if ((estimated_total_bytes > target_pack_budget)); then
+    die "Required OPlus framework is too large for target super even after omitting my_stock (estimate=$estimated_total_bytes, budget=$target_pack_budget)"
+fi
 
 phase "UNPACK OPLUS FRAMEWORK"
 log UNPACK "Extracting OPlus framework and compatibility data"

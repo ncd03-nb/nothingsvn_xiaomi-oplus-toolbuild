@@ -64,8 +64,11 @@ done
 group_size=$((super_size - 268435456))
 image_total=0
 for partition in $partition_list; do
-    image_total=$((image_total + $(stat -c%s "$IMAGES/$partition.img")))
+    partition_bytes=$(stat -c%s "$IMAGES/$partition.img")
+    image_total=$((image_total + partition_bytes))
+    log REPACK "Image size $partition.img: $partition_bytes bytes"
 done
+log REPACK "Dynamic image total: $image_total bytes; group capacity: $group_size bytes"
 (( image_total <= group_size )) || die "Dynamic images ($image_total bytes) exceed super group capacity ($group_size bytes)"
 is_ab=false
 [[ "$(cat "$WORK_DIR/bin/ddevice/slot_type.txt" 2>/dev/null || true)" == VAB ]] && is_ab=true

@@ -42,6 +42,7 @@ log PORT "Adding OPlus build.prop imports"
 system_prop="$BASE_IMAGES/system/system/build.prop"
 require_file "$system_prop"
 for part in my_bigball my_carrier my_engineering my_heytap my_manifest my_product my_region my_stock; do
+    [[ -f "$BASE_IMAGES/system/$part/build.prop" ]] || continue
     import_line="import /${part}/build.prop"
     grep -Fqx "$import_line" "$system_prop" || printf '%s\n' "$import_line" >> "$system_prop"
 done
