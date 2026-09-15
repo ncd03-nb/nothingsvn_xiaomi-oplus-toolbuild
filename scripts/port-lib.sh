@@ -188,11 +188,11 @@ extract_metadata_image() {
             && [[ -e "$destination/$partition/${target#/}" ]]; then
             extracted=1
         else
-            log WARN "$partition.img does not expose optional metadata path $target"
+            log INFO "$partition.img optional metadata unavailable: $target"
         fi
     done
     rm -f "$image"
-    ((extracted == 1)) || log WARN "No optional metadata extracted from $partition.img"
+    ((extracted == 1)) || log INFO "No optional metadata extracted from $partition.img"
 }
 
 remove_tree() {

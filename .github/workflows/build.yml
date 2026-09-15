@@ -57,6 +57,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
+      TZ: Asia/Ho_Chi_Minh
+      DISABLE_AVB: 'true'
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
       ENABLE_OPLUS_OVERLAYS: ${{ inputs.enable_oplus_overlays }}

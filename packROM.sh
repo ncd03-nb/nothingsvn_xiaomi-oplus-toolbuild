@@ -29,6 +29,16 @@ if [[ -f "$WORK_DIR/bin/ddevice/fstype.txt" ]]; then
     pack_type=$(tr '[:lower:]' '[:upper:]' < "$WORK_DIR/bin/ddevice/fstype.txt")
 fi
 
+DISABLE_AVB=${DISABLE_AVB:-true}
+if bool "$DISABLE_AVB"; then
+    phase "DISABLE ANDROID VERIFIED BOOT"
+    if find "$IMAGES" -type f -name '*fstab*' -print -quit | grep -q .; then
+        disable_avb_verify "$IMAGES"
+    else
+        log INFO "No extracted fstab requires AVB flag removal"
+    fi
+fi
+
 partition_list=""
 phase "REPACK DYNAMIC PARTITIONS"
 for partition in system system_ext product vendor odm mi_ext odm_dlkm system_dlkm vendor_dlkm product_dlkm; do
@@ -93,6 +103,20 @@ require_file "$IMAGES/super.img"
 for partition in $partition_list; do
     rm -f "$IMAGES/$partition.img"
 done
+
+if bool "$DISABLE_AVB"; then
+    patched_vbmeta=0
+    while IFS= read -r -d '' vbmeta_image; do
+        if [[ "$(head -c 4 "$vbmeta_image")" == AVB0 ]]; then
+            run_logged_task AVB "Disable verification in $(basename "$vbmeta_image")" "$vbmeta_image" \
+                python3 "$WORK_DIR/bin/patch-vbmeta.py" "$vbmeta_image"
+            patched_vbmeta=$((patched_vbmeta + 1))
+        else
+            log INFO "Skipping non-AVB image: $(basename "$vbmeta_image")"
+        fi
+    done < <(find "$IMAGES" -maxdepth 1 -type f -name 'vbmeta*.img' -print0)
+    ((patched_vbmeta > 0)) || log INFO "No standalone vbmeta image was present in the OTA payload"
+fi
 
 base_version=$(cat "$WORK_DIR/bin/ddevice/base_rom_code.txt" 2>/dev/null || printf HyperOS)
 port_version=$(cat "$WORK_DIR/bin/ddevice/port_rom_code.txt" 2>/dev/null || printf ColorOS)

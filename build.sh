@@ -113,11 +113,10 @@ for part in vendor odm mi_ext; do
     [[ -f "$base_images/$part.img" ]] && extract_image "$base_images/$part.img" "$base_images"
 done
 
-# system/product/system_ext are replaced by OPlus. Read only the small Xiaomi
-# metadata needed for detection instead of expanding and later deleting them.
-extract_metadata_image "$base_images/system.img" "$base_images" /system/build.prop
-extract_metadata_image "$base_images/product.img" "$base_images" /etc/build.prop /etc/device_features
-rm -f "$base_images/system_ext.img"
+# system/product/system_ext are replaced by OPlus. Device identity, Android
+# version and region come from Xiaomi vendor/ODM and OTA metadata. Avoid the
+# extractor's broken nested-path mode, which reports success without a file.
+rm -f "$base_images/system.img" "$base_images/product.img" "$base_images/system_ext.img"
 
 phase "DETECT XIAOMI DEVICE"
 device_json="$WORK_DIR/build/device.json"
@@ -177,12 +176,9 @@ log PORT "Estimated compressed dynamic footprint: $estimated_total_bytes bytes; 
 
 phase "UNPACK OPLUS FRAMEWORK"
 log UNPACK "Extracting OPlus framework and compatibility data"
-for part in system product system_ext my_product my_engineering my_stock my_carrier my_region my_bigball my_heytap my_manifest; do
+for part in system product system_ext vendor odm my_product my_engineering my_stock my_carrier my_region my_bigball my_heytap my_manifest; do
     [[ -f "$port_images/$part.img" ]] && extract_image "$port_images/$part.img" "$port_images"
 done
-# Only passwd/group are consumed from the OPlus vendor. Avoid expanding its
-# camera, audio and firmware trees that will never enter the final ROM.
-extract_metadata_image "$port_images/vendor.img" "$port_images" /etc/passwd /etc/group
 OPLUS_DEVICE_MODEL=$(first_prop "$port_images" ro.product.odm.model || true)
 OPLUS_DEVICE_MODEL=${OPLUS_DEVICE_MODEL:-$(first_prop "$port_images" ro.product.model || true)}
 OPLUS_BUILD_ID=$(first_prop "$port_images" ro.build.display.id.show || true)

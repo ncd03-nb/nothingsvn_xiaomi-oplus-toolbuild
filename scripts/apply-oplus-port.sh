@@ -59,6 +59,7 @@ fi
 if [[ -f "$PORT_IMAGES/vendor/etc/group" ]]; then
     cp -f "$PORT_IMAGES/vendor/etc/group" "$BASE_IMAGES/vendor/etc/group"
 fi
+remove_tree "$PORT_IMAGES/vendor" "Remove extracted donor vendor after passwd/group import"
 
 odm_root=$(find_odm_root "$BASE_IMAGES") || die "Xiaomi ODM not found (standalone or vendor/odm)"
 log PORT "Importing the OPlus ODM compatibility layer over Xiaomi hardware ODM"

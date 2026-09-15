@@ -20,6 +20,9 @@ secret `PORT_ASSETS_TOKEN`, so Telegram users still provide only two ROM links.
 The GitHub Actions workflow accepts only the two OTA URLs and detects device
 properties plus dynamic partition sizing from the extracted Xiaomi payload.
 The existing `nothingsvn-rom-bot` dispatches it with `/bp <xiaomi> -port <oplus>`.
+Build logs and Telegram timestamps use Vietnam time (`Asia/Ho_Chi_Minh`). AVB
+verification and verity are disabled by default by removing fstab AVB flags and
+patching every valid `vbmeta*.img`; set `DISABLE_AVB=false` only for debugging.
 
 The output name records both inputs, for example
 `HyperOS_OS3.0.5.0.VMRCNXM_to_ColorOS_16.0.10.500(EX01)_marble.zip`.

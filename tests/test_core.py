@@ -24,6 +24,20 @@ class PropertyEditorTests(unittest.TestCase):
             self.assertEqual(prop.read_text(encoding="utf-8"), "ro.test=new/value&safe\nro.keep=yes\n")
 
 
+class AvbPatcherTests(unittest.TestCase):
+    def test_sets_disable_verity_and_verification_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vbmeta = Path(directory) / "vbmeta.img"
+            image = bytearray(256)
+            image[:4] = b"AVB0"
+            vbmeta.write_bytes(image)
+            subprocess.run(
+                [sys.executable, str(ROOT / "bin" / "patch-vbmeta.py"), str(vbmeta)],
+                check=True,
+            )
+            self.assertEqual(vbmeta.read_bytes()[120:124], b"\x00\x00\x00\x03")
+
+
 class FileContextsNormalizationTests(unittest.TestCase):
     def test_escapes_utf8_bytes_without_changing_ascii_regex(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

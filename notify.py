@@ -4,9 +4,10 @@ import html
 import random
 import re
 import string
-from datetime import datetime, timezone
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -398,7 +399,7 @@ def build_action_url(repo_name: str) -> str:
 
 
 def current_time_text() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime("%Y-%m-%d %H:%M:%S GMT+7")
 
 
 def localize_conclusion(value: str) -> str:
