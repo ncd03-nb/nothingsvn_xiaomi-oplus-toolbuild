@@ -38,7 +38,11 @@ for partition in system system_ext product vendor odm mi_ext odm_dlkm system_dlk
         size=$(du -sb "$directory" | awk '{print $1}')
         size=$((size + 134217728))
         log REPACK "Preparing SELinux metadata for $partition ($(path_size "$directory"))"
-        python3 "$WORK_DIR/bin/fix_selinux.py" "$directory" "$CONFIG/${partition}_fs_config" "$CONFIG/${partition}_file_contexts" >/dev/null 2>&1 || true
+        python3 "$WORK_DIR/bin/fix_selinux.py" "$directory" "$CONFIG/${partition}_fs_config" "$CONFIG/${partition}_file_contexts" >/dev/null
+        normalized_bytes=$(python3 "$WORK_DIR/scripts/normalize-file-contexts.py" "$CONFIG/${partition}_file_contexts")
+        if ((normalized_bytes > 0)); then
+            log REPACK "Escaped $normalized_bytes non-ASCII UTF-8 bytes in ${partition}_file_contexts"
+        fi
         rm -f "$image"
         if [[ "$pack_type" == EXT ]]; then
             run_logged_task REPACK "Build $partition.img (EXT4)" "$image" \

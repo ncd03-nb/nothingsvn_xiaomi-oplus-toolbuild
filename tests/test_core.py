@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,77 @@ class PropertyEditorTests(unittest.TestCase):
                 check=True,
             )
             self.assertEqual(prop.read_text(encoding="utf-8"), "ro.test=new/value&safe\nro.keep=yes\n")
+
+
+class FileContextsNormalizationTests(unittest.TestCase):
+    def test_escapes_utf8_bytes_without_changing_ascii_regex(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            contexts = Path(directory) / "system_file_contexts"
+            contexts.write_bytes(
+                "/system/my_product/app/天气 u:object_r:system_file:s0\n"
+                "/system(/.*)? u:object_r:system_file:s0\n".encode("utf-8")
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "normalize-file-contexts.py"),
+                    str(contexts),
+                ],
+                check=True,
+            )
+            normalized = contexts.read_bytes()
+            self.assertTrue(normalized.isascii())
+            self.assertIn(b"/app/\\xe5\\xa4\\xa9\\xe6\\xb0\\x94 ", normalized)
+            self.assertIn(b"/system(/.*)? u:object_r:system_file:s0", normalized)
+
+    @unittest.skipUnless(
+        (ROOT / "bin" / "Linux" / "x86_64" / "mkfs.erofs").exists()
+        or shutil.which("mkfs.erofs"),
+        "mkfs.erofs is Linux-only",
+    )
+    def test_normalized_unicode_path_is_accepted_by_mkfs_erofs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "src"
+            source.mkdir()
+            (source / "天气").write_text("test", encoding="utf-8")
+            fs_config = root / "system_fs_config"
+            fs_config.write_text(
+                "/ 0 0 0755\nsystem 0 0 0755\nsystem/天气 0 0 0644\n",
+                encoding="utf-8",
+            )
+            contexts = root / "system_file_contexts"
+            contexts.write_text(
+                "/system(/.*)? u:object_r:system_file:s0\n"
+                "/system/天气 u:object_r:system_file:s0\n",
+                encoding="utf-8",
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "normalize-file-contexts.py"),
+                    str(contexts),
+                ],
+                check=True,
+            )
+            image = root / "system.img"
+            bundled_mkfs = ROOT / "bin" / "Linux" / "x86_64" / "mkfs.erofs"
+            mkfs = str(bundled_mkfs) if bundled_mkfs.exists() else "mkfs.erofs"
+            subprocess.run(
+                [
+                    mkfs,
+                    "--quiet",
+                    "-zlz4hc,9",
+                    "--mount-point",
+                    "system",
+                    f"--fs-config-file={fs_config}",
+                    f"--file-contexts={contexts}",
+                    str(image),
+                    str(source),
+                ],
+                check=True,
+            )
+            self.assertGreater(image.stat().st_size, 0)
 
 
 class DeviceDetectionTests(unittest.TestCase):
