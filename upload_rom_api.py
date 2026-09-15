@@ -2,9 +2,12 @@ import os
 import pickle
 import sys
 import argparse
+import json
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google.oauth2 import service_account
 import difflib
 
 # Scopes needed for Drive API (Uploading files)
@@ -12,20 +15,30 @@ SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 def get_credentials():
     creds = None
+    oauth_json = os.environ.get('GOOGLE_OAUTH_CREDENTIALS_JSON', '').strip()
+    service_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON', '').strip()
+    if service_json:
+        creds = service_account.Credentials.from_service_account_info(
+            json.loads(service_json), scopes=SCOPES
+        )
+    elif oauth_json:
+        creds = Credentials.from_authorized_user_info(json.loads(oauth_json), SCOPES)
     # Adjust path if token.pickle is in a different directory
     token_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'token.pickle')
-    if os.path.exists(token_path):
+    if creds is None and os.path.exists(token_path):
         with open(token_path, 'rb') as token:
             creds = pickle.load(token)
             
     if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
+        if creds:
             print("Refreshing access token...")
             creds.refresh(Request())
-            with open(token_path, 'wb') as token:
-                pickle.dump(creds, token)
+            if not (oauth_json or service_json):
+                with open(token_path, 'wb') as token:
+                    pickle.dump(creds, token)
         else:
-            print(f"Error: Invalid or missing token.pickle at {token_path}. Please generate it first.")
+            print("Error: configure GOOGLE_OAUTH_CREDENTIALS_JSON, "
+                  "GOOGLE_SERVICE_ACCOUNT_JSON, or token.pickle.")
             sys.exit(1)
             
     return creds

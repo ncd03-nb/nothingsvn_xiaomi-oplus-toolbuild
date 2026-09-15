@@ -103,6 +103,8 @@ extract_payload_rom() {
     mkdir -p "$destination/images"
     7z l "$archive" | grep -q 'payload.bin' || die "$label is not a payload OTA"
     log UNPACK "Extracting $label payload.bin"
+    7z e -so "$archive" META-INF/com/android/metadata \
+        > "$destination/ota_metadata.txt" 2>/dev/null || : > "$destination/ota_metadata.txt"
     7z x -y -mmt=on "$archive" payload.bin -o"$destination" >/dev/null
     # payload.bin is now standalone. Dropping the OTA archive before expanding
     # images saves 5-12 GiB on GitHub-hosted runners.
@@ -182,7 +184,8 @@ extract_metadata_image() {
     fi
     for target in "$@"; do
         if run_logged_task UNPACK "$partition.img metadata $target" "$destination/$partition" \
-            extract.erofs -i "$image" -o "$destination" -X "$target" -f; then
+            extract.erofs -i "$image" -o "$destination" -X "$target" -f \
+            && [[ -e "$destination/$partition/${target#/}" ]]; then
             extracted=1
         else
             log WARN "$partition.img does not expose optional metadata path $target"
@@ -203,6 +206,20 @@ copy_tree() {
     [[ -d "$source" ]] || return 0
     mkdir -p "$destination"
     cp -a "$source/." "$destination/"
+}
+
+copy_matching_files() {
+    local source="$1" destination="$2"
+    shift 2
+    [[ -d "$source" ]] || return 0
+    local pattern file relative
+    for pattern in "$@"; do
+        while IFS= read -r -d '' file; do
+            relative=${file#"$source/"}
+            mkdir -p "$destination/$(dirname "$relative")"
+            cp -af "$file" "$destination/$relative"
+        done < <(find "$source" -type f -path "$source/$pattern" -print0)
+    done
 }
 
 merge_config() {

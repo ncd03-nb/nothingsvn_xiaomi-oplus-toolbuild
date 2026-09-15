@@ -63,6 +63,9 @@ jobs:
       ENABLE_CRYPTOENG_HAL: ${{ inputs.enable_cryptoeng_hal }}
       ENABLE_BLUETOOTH_QTI_FIX: 'true'
       PORT_ASSETS_TOKEN: ${{ secrets.PORT_ASSETS_TOKEN }}
+      GOOGLE_OAUTH_CREDENTIALS_JSON: ${{ secrets.GOOGLE_OAUTH_CREDENTIALS_JSON }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
     steps:
       - name: Reclaim runner disk
         uses: easimon/maximize-build-space@v10
@@ -85,7 +88,7 @@ jobs:
           test -f setup.sh
           test -f notify.py
           sudo bash setup.sh
-          python3 -m pip install --disable-pip-version-check requests
+          python3 -m pip install --disable-pip-version-check requests google-api-python-client google-auth
           sudo chmod -R a+rx bin scripts
 
       - name: Load private compatibility assets
@@ -124,11 +127,24 @@ jobs:
       - name: Upload ROM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ColorOS15-xiaomi-${{ github.run_id }}
+          name: xiaomi-oplus-${{ github.run_id }}
           path: out/*.zip
           compression-level: 0
           if-no-files-found: error
           retention-days: 7
+
+      - name: Upload ROM to Google Drive
+        if: ${{ env.GDRIVE_FOLDER_ID != '' && (env.GOOGLE_OAUTH_CREDENTIALS_JSON != '' || env.GOOGLE_SERVICE_ACCOUNT_JSON != '') }}
+        run: |
+          set -euo pipefail
+          output_zip=$(find out -maxdepth 1 -type f -name '*.zip' -print -quit)
+          test -n "$output_zip"
+          device=$(cat bin/ddevice/device_code.txt)
+          python3 upload_rom_api.py "$output_zip" \
+            --folder_id "$GDRIVE_FOLDER_ID" \
+            --path "Xiaomi-OPlus/$device" \
+            --share \
+            --link_out bin/ddevice/gdrive_link.txt
 
       - name: Notify success
         if: success()

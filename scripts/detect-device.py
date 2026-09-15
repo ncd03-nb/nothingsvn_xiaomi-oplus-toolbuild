@@ -189,10 +189,73 @@ def detect_super_size(metadata_path: Path | None) -> tuple[str, str]:
     return str(group_size + 256 * 1024 * 1024), str(group_size)
 
 
+def read_ota_metadata(path: Path | None) -> dict[str, str]:
+    if not path or not path.is_file():
+        return {}
+    result: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        if key.strip() and value.strip():
+            result[key.strip()] = value.strip()
+    return result
+
+
+def android_from_sdk(value: str) -> str:
+    try:
+        sdk = int(value)
+    except (TypeError, ValueError):
+        return ""
+    # Android's platform SDK mapping is stable for the versions accepted by
+    # this porter (Android 10 through Android 16).
+    return str(sdk - 20) if 29 <= sdk <= 36 else ""
+
+
+def xiaomi_version(candidates: list[str]) -> str:
+    for value in candidates:
+        match = re.search(r"\b(OS\d+(?:\.\d+){2,}\.[A-Z0-9]+)\b", value, re.I)
+        if match:
+            return match.group(1).upper()
+    return ""
+
+
+def xiaomi_region(props: dict[str, list[str]], version: str) -> str:
+    code = choose(props, "ro.vendor.miui.build.region", "ro.miui.build.region").lower()
+    names = {
+        "cn": "China",
+        "global": "Global",
+        "eea": "Europe",
+        "eu": "Europe",
+        "in": "India",
+        "tw": "Taiwan",
+        "ru": "Russia",
+        "id": "Indonesia",
+        "tr": "Turkey",
+        "jp": "Japan",
+    }
+    if code in names:
+        return names[code]
+    suffixes = {
+        "CNXM": "China",
+        "MIXM": "Global",
+        "EUXM": "Europe",
+        "INXM": "India",
+        "TWXM": "Taiwan",
+        "RUXM": "Russia",
+        "IDXM": "Indonesia",
+        "TRXM": "Turkey",
+        "JPXM": "Japan",
+    }
+    return next((name for suffix, name in suffixes.items() if version.endswith(suffix)), code)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--payload-metadata", type=Path)
+    parser.add_argument("--ota-metadata", type=Path)
+    parser.add_argument("--rom-name", default="")
     parser.add_argument(
         "--device-specs",
         type=Path,
@@ -224,7 +287,16 @@ def main() -> int:
     explicit_soc = choose(props, "ro.soc.model", "ro.vendor.soc.model")
     soc = explicit_soc or choose(props, "ro.board.platform", "ro.hardware", "ro.product.board")
     first_api = choose(props, "ro.product.first_api_level", "ro.board.first_api_level")
-    android = choose(props, "ro.build.version.release", "ro.system.build.version.release")
+    ota = read_ota_metadata(args.ota_metadata)
+    android_sdk = ota.get("post-sdk-level", "")
+    filename_android = re.search(r"-user-(\d+(?:\.\d+)?)", args.rom_name, re.I)
+    android = (
+        android_from_sdk(android_sdk)
+        or (filename_android.group(1).split(".", 1)[0] if filename_android else "")
+        or choose(props, "ro.build.version.release", "ro.system.build.version.release")
+    )
+    if not android_sdk and android.isdigit() and 10 <= int(android) <= 16:
+        android_sdk = str(int(android) + 20)
     ab_update = choose(props, "ro.build.ab_update")
     front_camera = normalize_mp(find_by_key_pattern(props, ("camera", "front")))
     back_camera = normalize_mp(find_by_key_pattern(props, ("camera", "back")))
@@ -256,14 +328,27 @@ def main() -> int:
         "ro.product.display.lcd_density",
     )
     super_size, group_size = detect_super_size(args.payload_metadata)
+    base_version = xiaomi_version(
+        [
+            choose(props, "ro.vendor.build.version.incremental", "ro.odm.build.version.incremental"),
+            ota.get("post-build-incremental", ""),
+            ota.get("post-build", ""),
+            args.rom_name,
+        ]
+    )
+    region = xiaomi_region(props, base_version)
 
     result = {
         "device_codename": codename,
         "device_model": model or codename,
         "device_name": market_name or model or codename,
         "soc_model": soc,
+        "soc_id": device_spec.get("soc_id", explicit_soc or soc),
         "first_api_level": first_api,
         "android_version": android,
+        "android_sdk": android_sdk,
+        "base_rom_version": base_version,
+        "base_region": region,
         "ab_update": ab_update,
         "front_camera_mp": front_camera,
         "back_camera_mp": back_camera,

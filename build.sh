@@ -57,7 +57,7 @@ rm -f "$WORK_DIR/downloads/base.zip"
 # Only OPlus framework/compatibility partitions are consumed below. Extracting
 # every firmware and boot partition from a 60+ partition payload wastes runner
 # disk and can leave payload-extract doing hours of unnecessary I/O.
-OPLUS_PARTITIONS="system,product,system_ext,vendor,my_product,my_engineering,my_stock,my_carrier,my_region,my_bigball,my_heytap,my_manifest"
+OPLUS_PARTITIONS="system,product,system_ext,vendor,odm,my_product,my_engineering,my_stock,my_carrier,my_region,my_bigball,my_heytap,my_manifest"
 extract_payload_rom "$WORK_DIR/downloads/oplus.zip" "$WORK_DIR/build/portrom" "OPlus port ROM" "$OPLUS_PARTITIONS"
 rm -f "$WORK_DIR/downloads/oplus.zip"
 
@@ -124,6 +124,8 @@ device_json="$WORK_DIR/build/device.json"
 python3 "$WORK_DIR/scripts/detect-device.py" \
     --root "$base_images" \
     --payload-metadata "$WORK_DIR/build/baserom/payload_metadata.json" \
+    --ota-metadata "$WORK_DIR/build/baserom/ota_metadata.txt" \
+    --rom-name "$(rom_filename "$BASE_ROM")" \
     --output "$device_json"
 json_value() {
     python3 - "$device_json" "$1" <<'PY'
@@ -137,7 +139,12 @@ DEVICE_CODENAME=$(json_value device_codename)
 DEVICE_MODEL=$(json_value device_model)
 DEVICE_NAME=$(json_value device_name)
 SOC_MODEL=$(json_value soc_model)
+SOC_ID=$(json_value soc_id)
 FIRST_API_LEVEL=$(json_value first_api_level)
+ANDROID_VERSION=$(json_value android_version)
+ANDROID_SDK=$(json_value android_sdk)
+BASE_ROM_VERSION=$(json_value base_rom_version)
+BASE_REGION=$(json_value base_region)
 AB_UPDATE=$(json_value ab_update)
 FRONT_CAMERA_MP=$(json_value front_camera_mp)
 BACK_CAMERA_MP=$(json_value back_camera_mp)
@@ -146,7 +153,7 @@ DISPLAY_DENSITY=$(json_value display_density)
 BATTERY_CAPACITY_MAH=$(json_value battery_capacity_mah)
 SUPER_SIZE=$(json_value super_size)
 DYNAMIC_GROUP_SIZE=$(json_value dynamic_group_size)
-export DEVICE_CODENAME DEVICE_MODEL DEVICE_NAME SOC_MODEL FIRST_API_LEVEL AB_UPDATE
+export DEVICE_CODENAME DEVICE_MODEL DEVICE_NAME SOC_MODEL SOC_ID FIRST_API_LEVEL AB_UPDATE
 export FRONT_CAMERA_MP BACK_CAMERA_MP SCREEN_SIZE_INCHES DISPLAY_DENSITY BATTERY_CAPACITY_MAH
 export SUPER_SIZE DYNAMIC_GROUP_SIZE ENABLE_OPLUS_OVERLAYS ENABLE_CRYPTOENG_HAL
 export ENABLE_VNDK_APEX ENABLE_BLUETOOTH_QTI_FIX EXTRAS_DIR
@@ -156,27 +163,17 @@ export ENABLE_VNDK_APEX ENABLE_BLUETOOTH_QTI_FIX EXTRAS_DIR
 [[ "$SUPER_SIZE" =~ ^[0-9]+$ ]] || die "Could not derive super size from Xiaomi payload dynamic-partition metadata"
 log DETECT "Device=$DEVICE_NAME codename=$DEVICE_CODENAME SoC=${SOC_MODEL:-unknown} first_api=$FIRST_API_LEVEL super=$SUPER_SIZE"
 
-# OPlus devices often have a much larger dynamic partition than the Xiaomi
-# target.  my_stock is a large regional/stock-app layer and is not required by
-# the core framework port.  Drop it automatically when the original compressed
-# image footprints would leave less than 5% repack headroom.
+# Log the source footprint for diagnosis. The reference marble port retains
+# my_stock and my_product after selective debloating, so capacity is validated
+# from the rebuilt images in packROM.sh instead of deleting a whole partition.
 target_group_capacity=$((SUPER_SIZE - 268435456))
 target_pack_budget=$((target_group_capacity * 95 / 100))
 estimated_port_bytes=0
-for part in system product system_ext my_product my_engineering my_stock my_carrier my_region my_bigball my_heytap my_manifest; do
+for part in system product system_ext odm my_product my_engineering my_stock my_carrier my_region my_bigball my_heytap my_manifest; do
     [[ -f "$port_images/$part.img" ]] && estimated_port_bytes=$((estimated_port_bytes + $(stat -c%s "$port_images/$part.img")))
 done
 estimated_total_bytes=$((retained_base_payload_bytes + estimated_port_bytes))
 log PORT "Estimated compressed dynamic footprint: $estimated_total_bytes bytes; safe target budget: $target_pack_budget bytes"
-if ((estimated_total_bytes > target_pack_budget)) && [[ -f "$port_images/my_stock.img" ]]; then
-    my_stock_bytes=$(stat -c%s "$port_images/my_stock.img")
-    rm -f "$port_images/my_stock.img"
-    estimated_total_bytes=$((estimated_total_bytes - my_stock_bytes))
-    log WARN "Omitting optional OPlus my_stock ($my_stock_bytes bytes) to fit target super"
-fi
-if ((estimated_total_bytes > target_pack_budget)); then
-    die "Required OPlus framework is too large for target super even after omitting my_stock (estimate=$estimated_total_bytes, budget=$target_pack_budget)"
-fi
 
 phase "UNPACK OPLUS FRAMEWORK"
 log UNPACK "Extracting OPlus framework and compatibility data"
@@ -186,6 +183,18 @@ done
 # Only passwd/group are consumed from the OPlus vendor. Avoid expanding its
 # camera, audio and firmware trees that will never enter the final ROM.
 extract_metadata_image "$port_images/vendor.img" "$port_images" /etc/passwd /etc/group
+OPLUS_DEVICE_MODEL=$(first_prop "$port_images" ro.product.odm.model || true)
+OPLUS_DEVICE_MODEL=${OPLUS_DEVICE_MODEL:-$(first_prop "$port_images" ro.product.model || true)}
+OPLUS_BUILD_ID=$(first_prop "$port_images" ro.build.display.id.show || true)
+OPLUS_BUILD_ID=${OPLUS_BUILD_ID:-$(first_prop "$port_images" ro.build.display.id || true)}
+OPLUS_VERSION=$(python3 - "$OPLUS_BUILD_ID" <<'PY'
+import re, sys
+value = sys.argv[1]
+m = re.search(r'(\d+\.\d+\.\d+\.\d+(?:\([^)]+\))?)', value)
+print(m.group(1) if m else (value or 'ColorOS'))
+PY
+)
+export OPLUS_DEVICE_MODEL OPLUS_BUILD_ID OPLUS_VERSION
 
 export BASE_IMAGES="$base_images" PORT_IMAGES="$port_images"
 phase "COMPOSE OPLUS PORT"
@@ -197,14 +206,15 @@ mkdir -p "$WORK_DIR/bin/ddevice"
 printf '%s\n' "$DEVICE_CODENAME" > "$WORK_DIR/bin/ddevice/device_f.txt"
 printf '%s\n' "$DEVICE_CODENAME" > "$WORK_DIR/bin/ddevice/device_code.txt"
 printf '%s\n' "$DEVICE_NAME" > "$WORK_DIR/bin/ddevice/name_devices.txt"
-printf '%s\n' "${OPLUS_VERSION:-ColorOS15}" > "$WORK_DIR/bin/ddevice/base_rom_code.txt"
-printf '%s\n' "ColorOS" > "$WORK_DIR/bin/ddevice/rom_os.txt"
+printf '%s\n' "${BASE_ROM_VERSION:-HyperOS}" > "$WORK_DIR/bin/ddevice/base_rom_code.txt"
+printf '%s\n' "HyperOS" > "$WORK_DIR/bin/ddevice/rom_os.txt"
 printf '%s\n' "OPlus" > "$WORK_DIR/bin/ddevice/os_type.txt"
-printf '%s\n' "Global" > "$WORK_DIR/bin/ddevice/device_type.txt"
+printf '%s\n' "${BASE_REGION:-Unknown}" > "$WORK_DIR/bin/ddevice/device_type.txt"
 printf '%s\n' "payload" > "$WORK_DIR/bin/ddevice/romtype.txt"
-android_version=$(first_prop "$base_images" ro.build.version.release || true)
-printf '%s\n' "${android_version:-15}" > "$WORK_DIR/bin/ddevice/androidver.txt"
-printf '%s\n' "${FIRST_API_LEVEL}" > "$WORK_DIR/bin/ddevice/sdkLevel.txt"
+printf '%s\n' "${ANDROID_VERSION:-Unknown}" > "$WORK_DIR/bin/ddevice/androidver.txt"
+printf '%s\n' "${ANDROID_SDK:-Unknown}" > "$WORK_DIR/bin/ddevice/sdkLevel.txt"
+printf '%s\n' "$FIRST_API_LEVEL" > "$WORK_DIR/bin/ddevice/first_api_level.txt"
+printf '%s\n' "$OPLUS_VERSION" > "$WORK_DIR/bin/ddevice/port_rom_code.txt"
 printf '%s\n' "$SUPER_SIZE" > "$WORK_DIR/bin/ddevice/profile_super_size.txt"
 if [[ "${AB_UPDATE,,}" == true ]]; then
     printf '%s\n' VAB > "$WORK_DIR/bin/ddevice/slot_type.txt"

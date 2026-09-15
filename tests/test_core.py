@@ -97,7 +97,8 @@ class FileContextsNormalizationTests(unittest.TestCase):
 
 class DeviceDetectionTests(unittest.TestCase):
     def run_detection(
-        self, root: Path, metadata: Path, output: Path, device_specs: Path | None = None
+        self, root: Path, metadata: Path, output: Path, device_specs: Path | None = None,
+        ota_metadata: Path | None = None, rom_name: str = ""
     ) -> dict[str, str]:
         command = [
                 sys.executable,
@@ -111,6 +112,10 @@ class DeviceDetectionTests(unittest.TestCase):
             ]
         if device_specs:
             command.extend(("--device-specs", str(device_specs)))
+        if ota_metadata:
+            command.extend(("--ota-metadata", str(ota_metadata)))
+        if rom_name:
+            command.extend(("--rom-name", rom_name))
         subprocess.run(command, check=True)
         return json.loads(output.read_text(encoding="utf-8"))
 
@@ -225,6 +230,31 @@ class DeviceDetectionTests(unittest.TestCase):
             self.assertEqual(detected["back_camera_mp"], "64MP+8MP+2MP")
             self.assertEqual(detected["screen_size_inches"], "6.67")
             self.assertEqual(detected["battery_capacity_mah"], "5000")
+
+    def test_detects_hyperos_release_android_sdk_and_region(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "images"
+            vendor = root / "vendor"
+            vendor.mkdir(parents=True)
+            (vendor / "build.prop").write_text(
+                "ro.product.vendor.device=marble\n"
+                "ro.product.first_api_level=33\n"
+                "ro.vendor.build.version.incremental=OS3.0.5.0.VMRCNXM\n"
+                "ro.vendor.miui.build.region=cn\n",
+                encoding="utf-8",
+            )
+            ota = Path(directory) / "ota_metadata.txt"
+            ota.write_text("post-sdk-level=35\n", encoding="utf-8")
+            detected = self.run_detection(
+                root, Path(directory) / "payload.json", Path(directory) / "device.json",
+                ota_metadata=ota,
+                rom_name="marble-ota_full-OS3.0.5.0.VMRCNXM-user-15.0.zip",
+            )
+            self.assertEqual(detected["android_version"], "15")
+            self.assertEqual(detected["android_sdk"], "35")
+            self.assertEqual(detected["base_rom_version"], "OS3.0.5.0.VMRCNXM")
+            self.assertEqual(detected["base_region"], "China")
+            self.assertEqual(detected["soc_id"], "SM7475")
 
 
 if __name__ == "__main__":

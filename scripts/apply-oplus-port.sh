@@ -38,14 +38,17 @@ for part in my_product my_engineering my_stock my_carrier my_region my_bigball m
     merge_config "$PORT_IMAGES/config/${part}_file_contexts" "$BASE_IMAGES/config/system_file_contexts"
 done
 
-log PORT "Adding OPlus build.prop imports"
-system_prop="$BASE_IMAGES/system/system/build.prop"
-require_file "$system_prop"
-for part in my_bigball my_carrier my_engineering my_heytap my_manifest my_product my_region my_stock; do
-    [[ -f "$BASE_IMAGES/system/$part/build.prop" ]] || continue
-    import_line="import /${part}/build.prop"
-    grep -Fqx "$import_line" "$system_prop" || printf '%s\n' "$import_line" >> "$system_prop"
-done
+log PORT "Applying reference-port debloat set"
+prune_file="$WORK_DIR/devices/reference-port-prune.txt"
+if [[ -f "$prune_file" ]]; then
+    while IFS= read -r relative || [[ -n "$relative" ]]; do
+        [[ -z "$relative" || "$relative" == \#* ]] && continue
+        if [[ -e "$BASE_IMAGES/system/$relative" ]]; then
+            log PORT "Debloat /system/$relative"
+            rm -rf -- "$BASE_IMAGES/system/$relative"
+        fi
+    done < "$prune_file"
+fi
 
 # SIM2 and OPlus account services expect OPlus passwd/group entries. The rest of
 # the vendor remains the Xiaomi stock vendor for hardware compatibility.
@@ -58,24 +61,69 @@ if [[ -f "$PORT_IMAGES/vendor/etc/group" ]]; then
 fi
 
 odm_root=$(find_odm_root "$BASE_IMAGES") || die "Xiaomi ODM not found (standalone or vendor/odm)"
-odm_prop="$odm_root/etc/build.prop"
-[[ -f "$odm_prop" ]] || odm_prop="$odm_root/build.prop"
-touch "$odm_prop"
+log PORT "Importing the OPlus ODM compatibility layer over Xiaomi hardware ODM"
+copy_matching_files "$PORT_IMAGES/odm" "$odm_root" \
+    'bin/hw/vendor-oplus-*' \
+    'bin/hw/vendor.oplus.*' \
+    'etc/aac_richtap.config' \
+    'etc/custom_power.cfg' \
+    'etc/default.cfg' \
+    'etc/Diag.cfg' \
+    'etc/devices_config/*' \
+    'etc/init/*oplus*' \
+    'etc/init/*orms*' \
+    'etc/normalize/*' \
+    'etc/orms/*' \
+    'etc/permissions/com.oplus.*' \
+    'etc/permissions/vendor-oplus-*' \
+    'etc/power_profile/power_monitor_config.xml' \
+    'etc/vintf/manifest/*oplus*' \
+    'etc/vintf/manifest/*performance*' \
+    'etc/vintf/manifest/*powermonitor*' \
+    'etc/vintf/manifest/*orms*' \
+    'etc/vintf/manifest/*urcc*' \
+    'lib*/liboplus-*' \
+    'lib*/liborms*' \
+    'lib*/libosense*' \
+    'lib*/libuah*' \
+    'lib64/liburcccore.so' \
+    'lib*/vendor.oplus.*'
+odm_prop="$odm_root/build.prop"
+if [[ -f "$PORT_IMAGES/odm/build.prop" ]]; then
+    cp -f "$PORT_IMAGES/odm/build.prop" "$odm_prop"
+else
+    touch "$odm_prop"
+fi
+
+# The shipping reference imports merged my_* trees from /system via ODM. This
+# preserves ColorOS' own system build.prop and matches Android mount paths.
+odm_imports="$odm_root/etc/build.prop"
+mkdir -p "$(dirname "$odm_imports")"
+cat > "$odm_imports" <<'EOF'
+import /odm/etc/${ro.boot.prjname}/build.gsi.prop
+import /odm/etc/${ro.boot.prjname}/build.${ro.boot.flag}.prop
+import /mnt/vendor/my_product/etc/${ro.boot.prjname}/build.${ro.boot.flag}.prop
+EOF
+for part in my_bigball my_carrier my_engineering my_heytap my_manifest my_product my_region my_stock; do
+    [[ -f "$BASE_IMAGES/system/$part/build.prop" ]] && printf 'import /system/%s/build.prop\n' "$part" >> "$odm_imports"
+done
+printf '%s\n' 'import /odm/build.prop' >> "$odm_imports"
+remove_tree "$PORT_IMAGES/odm" "Remove extracted donor ODM after compatibility import"
 
 for required in DEVICE_CODENAME DEVICE_MODEL DEVICE_NAME; do
     [[ -n "${!required:-}" ]] || die "$required could not be detected from the Xiaomi ROM"
 done
 
 log PORT "Writing detected device properties to Xiaomi ODM"
-if [[ -n "${SOC_MODEL:-}" ]]; then
-    set_prop "$odm_prop" ro.build.device_family "OP${SOC_MODEL}"
-    set_prop "$odm_prop" ro.product.oplus.cpuinfo "$SOC_MODEL"
+if [[ -n "${SOC_ID:-${SOC_MODEL:-}}" ]]; then
+    set_prop "$odm_prop" ro.build.device_family "OP${SOC_ID:-$SOC_MODEL}"
+    set_prop "$odm_prop" ro.product.oplus.cpuinfo "${SOC_ID:-$SOC_MODEL}"
 else
     log WARN "SoC model was not present in Xiaomi properties; CPU display props were left unchanged"
 fi
 set_prop "$odm_prop" ro.product.brand OPPO
 set_prop "$odm_prop" ro.product.manufacturer OPPO
-set_prop "$odm_prop" ro.product.model "$DEVICE_CODENAME"
+set_prop "$odm_prop" ro.product.model "${OPLUS_DEVICE_MODEL:-$DEVICE_CODENAME}"
 set_prop "$odm_prop" ro.product.odm.brand OPPO
 set_prop "$odm_prop" ro.product.odm.manufacturer OPPO
 set_prop "$odm_prop" ro.vendor.oplus.market.name "$DEVICE_NAME"
@@ -94,7 +142,6 @@ if [[ -n "${SCREEN_SIZE_INCHES:-}" ]]; then
 else
     log WARN "Screen diagonal not found in Xiaomi ROM"
 fi
-set_prop "$odm_prop" ro.build.version.oplusrom V15.0
 set_prop "$odm_prop" ro.vendor.audio.policy.engine.odm true
 
 # Xiaomi sometimes ships a second codename-specific ODM property file.

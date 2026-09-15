@@ -94,14 +94,18 @@ for partition in $partition_list; do
     rm -f "$IMAGES/$partition.img"
 done
 
-output_dir="$WORK_DIR/out/ColorOS_${device_code}"
+base_version=$(cat "$WORK_DIR/bin/ddevice/base_rom_code.txt" 2>/dev/null || printf HyperOS)
+port_version=$(cat "$WORK_DIR/bin/ddevice/port_rom_code.txt" 2>/dev/null || printf ColorOS)
+safe_name() { printf '%s' "$1" | sed -E 's/[^A-Za-z0-9._()-]+/-/g; s/^-+|-+$//g'; }
+archive_stem="$(safe_name "HyperOS_${base_version}_to_ColorOS_${port_version}_${device_code}")"
+output_dir="$WORK_DIR/out/${archive_stem}"
 mkdir -p "$output_dir/images" "$output_dir/super"
 mv "$IMAGES/super.img" "$output_dir/super/"
 find "$IMAGES" -maxdepth 1 -type f -name '*.img' -exec mv -t "$output_dir/images" {} +
 cp -f "$WORK_DIR/bin/script2flash/"*.install "$output_dir/" 2>/dev/null || true
 copy_tree "$WORK_DIR/bin/script2flash/META-INF" "$output_dir/META-INF"
 chmod 0755 "$output_dir/META-INF/com/google/android/update-binary"
-output_archive="$WORK_DIR/out/ColorOS15_${device_code}_$(date +%Y%m%d).zip"
+output_archive="$WORK_DIR/out/${archive_stem}.zip"
 (
     cd "$output_dir"
     run_logged_task REPACK "Create flashable ZIP" "$output_archive" zip -r -1 "$output_archive" ./*
