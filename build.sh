@@ -65,6 +65,21 @@ base_images="$WORK_DIR/build/baserom/images"
 port_images="$WORK_DIR/build/portrom/images"
 base_super="$base_images/super.img"
 
+# OPlus payloads expose framework extension partitions named my_product,
+# my_manifest, etc.  Seeing one in the first input is definitive evidence that
+# the two OTA links were reversed.  Stop before unpacking gigabytes of images
+# or, worse, writing OPlus source-device properties into the target ODM.
+base_oplus_marker=""
+for marker in "$base_images"/my_*.img; do
+    if [[ -f "$marker" ]]; then
+        base_oplus_marker=$(basename "$marker")
+        break
+    fi
+done
+if [[ -n "$base_oplus_marker" ]]; then
+    die "ROM input roles are reversed: the first URL contains OPlus partition $base_oplus_marker; use Xiaomi first and OPlus after -port"
+fi
+
 for required_port_part in system product system_ext; do
     [[ -f "$port_images/$required_port_part.img" ]] || die "OPlus payload is missing required partition: $required_port_part"
 done

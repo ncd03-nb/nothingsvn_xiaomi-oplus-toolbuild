@@ -174,7 +174,13 @@ patch_property_contexts "$BASE_IMAGES" "${PROPERTY_CONTEXT_PATCH_FILE:-}"
 
 # Remove accidental desktop metadata and reject common unsafe placeholder values.
 log PORT "Running final composition validation"
-find "$BASE_IMAGES" -type f \( -name '.DS_Store' -o -name 'Thumbs.db' \) -delete
-grep -Rqs '#add your' "$BASE_IMAGES" && die "Unresolved tutorial placeholder found in build.prop"
+run_logged_task PORT "Remove desktop metadata" "$BASE_IMAGES" \
+    find "$BASE_IMAGES" -type f \( -name '.DS_Store' -o -name 'Thumbs.db' \) -delete
+# Restrict the content scan to property files.  The previous recursive grep
+# read every APK, shared library and firmware blob in the 10+ GiB ROM tree and
+# appeared stuck for tens of minutes on GitHub-hosted runners.
+if grep -Rqs --include='build.prop' --include='*.prop' '#add your' "$BASE_IMAGES"; then
+    die "Unresolved tutorial placeholder found in build.prop"
+fi
 
 log PORT "OPlus framework port composition completed"
