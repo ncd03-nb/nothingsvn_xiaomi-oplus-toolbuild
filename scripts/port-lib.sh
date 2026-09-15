@@ -53,11 +53,14 @@ obtain_rom() {
 }
 
 extract_payload_rom() {
-    local archive="$1" destination="$2" label="$3"
+    local archive="$1" destination="$2" label="$3" partitions="${4:-}"
     mkdir -p "$destination/images"
     7z l "$archive" | grep -q 'payload.bin' || die "$label is not a payload OTA"
     log UNPACK "Extracting $label payload.bin"
     7z x -y -mmt=on "$archive" payload.bin -o"$destination" >/dev/null
+    # payload.bin is now standalone. Dropping the OTA archive before expanding
+    # images saves 5-12 GiB on GitHub-hosted runners.
+    rm -f "$archive"
     # New payload-extract releases support JSON; the bundled legacy binary only
     # prints text. Keep one metadata file and let detect-device.py parse either.
     if ! payload-extract metadata "$destination/payload.bin" --json \
@@ -68,7 +71,32 @@ extract_payload_rom() {
             log WARN "Could not read payload metadata for $label"
         fi
     fi
-    payload-extract extract -o "$destination/images" "$destination/payload.bin"
+    local extract_args=(extract -o "$destination/images")
+    if [[ -n "$partitions" ]]; then
+        extract_args+=(-p "$partitions")
+        log UNPACK "$label selected partitions: $partitions"
+    fi
+    extract_args+=("$destination/payload.bin")
+
+    # The extractor renders progress only on an interactive terminal. Run it
+    # in the background and emit a periodic heartbeat for Actions and Telegram
+    # diagnosis instead of appearing frozen for hours.
+    payload-extract "${extract_args[@]}" &
+    local extract_pid=$! elapsed=0
+    while kill -0 "$extract_pid" 2>/dev/null; do
+        sleep 30
+        if kill -0 "$extract_pid" 2>/dev/null; then
+            elapsed=$((elapsed + 30))
+            local image_size free_space
+            image_size=$(du -sh "$destination/images" 2>/dev/null | awk '{print $1}')
+            free_space=$(df -h "$destination" | awk 'NR==2 {print $4}')
+            log UNPACK "$label still extracting (${elapsed}s, images=${image_size:-0}, free=${free_space:-unknown})"
+        fi
+    done
+    wait "$extract_pid" || {
+        local status=$?
+        die "$label payload extraction failed (exit $status)"
+    }
     rm -f "$destination/payload.bin"
 }
 

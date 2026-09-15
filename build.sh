@@ -52,12 +52,20 @@ obtain_rom "$OPLUS_ROM" "OPlus port ROM" "$WORK_DIR/downloads/oplus.zip"
 notify unpack "$REPO_NAME" "$BASE_ROM" "$PREFIX_ID" "$BUILDER_NAME" "$BUILDER_ID"
 extract_payload_rom "$WORK_DIR/downloads/base.zip" "$WORK_DIR/build/baserom" "Xiaomi base ROM"
 rm -f "$WORK_DIR/downloads/base.zip"
-extract_payload_rom "$WORK_DIR/downloads/oplus.zip" "$WORK_DIR/build/portrom" "OPlus port ROM"
+# Only OPlus framework/compatibility partitions are consumed below. Extracting
+# every firmware and boot partition from a 60+ partition payload wastes runner
+# disk and can leave payload-extract doing hours of unnecessary I/O.
+OPLUS_PARTITIONS="system,product,system_ext,vendor,odm,my_product,my_engineering,my_stock,my_carrier,my_region,my_bigball,my_heytap,my_manifest"
+extract_payload_rom "$WORK_DIR/downloads/oplus.zip" "$WORK_DIR/build/portrom" "OPlus port ROM" "$OPLUS_PARTITIONS"
 rm -f "$WORK_DIR/downloads/oplus.zip"
 
 base_images="$WORK_DIR/build/baserom/images"
 port_images="$WORK_DIR/build/portrom/images"
 base_super="$base_images/super.img"
+
+for required_port_part in system product system_ext; do
+    [[ -f "$port_images/$required_port_part.img" ]] || die "OPlus payload is missing required partition: $required_port_part"
+done
 
 # Capture the original super size before unpacking if the OTA exposes super.img.
 if [[ -f "$base_super" ]]; then
