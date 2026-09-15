@@ -452,6 +452,14 @@ def collect_device_info():
             ]
             if is_available(part)
         ),
+        "ROM port": " | ".join(
+            part
+            for part in [
+                "ColorOS",
+                read_file_if_exists("bin/ddevice/port_rom_code.txt"),
+            ]
+            if is_available(part)
+        ),
         "Khu vực": read_first([
             "bin/ddevice/rom_region.txt",
             "bin/ddevice/device_type.txt",
