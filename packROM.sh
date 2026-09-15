@@ -30,21 +30,25 @@ if [[ -f "$WORK_DIR/bin/ddevice/fstype.txt" ]]; then
 fi
 
 partition_list=""
+phase "REPACK DYNAMIC PARTITIONS"
 for partition in system system_ext product vendor odm mi_ext odm_dlkm system_dlkm vendor_dlkm product_dlkm; do
     directory="$IMAGES/$partition"
     image="$IMAGES/$partition.img"
     if [[ -d "$directory" ]]; then
         size=$(du -sb "$directory" | awk '{print $1}')
         size=$((size + 134217728))
+        log REPACK "Preparing SELinux metadata for $partition ($(path_size "$directory"))"
         python3 "$WORK_DIR/bin/fix_selinux.py" "$directory" "$CONFIG/${partition}_fs_config" "$CONFIG/${partition}_file_contexts" >/dev/null 2>&1 || true
         rm -f "$image"
         if [[ "$pack_type" == EXT ]]; then
-            make_ext4fs -J -T "$(date +%s)" -S "$CONFIG/${partition}_file_contexts" -l "$size" \
-                -C "$CONFIG/${partition}_fs_config" -L "$partition" -a "$partition" "$image" "$directory" >/dev/null
+            run_logged_task REPACK "Build $partition.img (EXT4)" "$image" \
+                make_ext4fs -J -T "$(date +%s)" -S "$CONFIG/${partition}_file_contexts" -l "$size" \
+                -C "$CONFIG/${partition}_fs_config" -L "$partition" -a "$partition" "$image" "$directory"
         else
-            mkfs.erofs --quiet -zlz4hc,9 --mount-point "$partition" \
+            run_logged_task REPACK "Build $partition.img (EROFS)" "$image" \
+                mkfs.erofs --quiet -zlz4hc,9 --mount-point "$partition" \
                 --fs-config-file="$CONFIG/${partition}_fs_config" \
-                --file-contexts="$CONFIG/${partition}_file_contexts" "$image" "$directory" >/dev/null
+                --file-contexts="$CONFIG/${partition}_file_contexts" "$image" "$directory"
         fi
         [[ -s "$image" ]] || die "Failed to repack $partition.img"
         rm -rf "$directory"
@@ -76,8 +80,8 @@ else
     done
 fi
 
-log REPACK "Building super.img ($super_size bytes)"
-lpmake "${args[@]}"
+phase "BUILD SUPER IMAGE"
+run_logged_task REPACK "Build super.img ($super_size bytes)" "$IMAGES/super.img" lpmake "${args[@]}"
 require_file "$IMAGES/super.img"
 for partition in $partition_list; do
     rm -f "$IMAGES/$partition.img"
@@ -90,9 +94,10 @@ find "$IMAGES" -maxdepth 1 -type f -name '*.img' -exec mv -t "$output_dir/images
 cp -f "$WORK_DIR/bin/script2flash/"*.install "$output_dir/" 2>/dev/null || true
 copy_tree "$WORK_DIR/bin/script2flash/META-INF" "$output_dir/META-INF"
 chmod 0755 "$output_dir/META-INF/com/google/android/update-binary"
+output_archive="$WORK_DIR/out/ColorOS15_${device_code}_$(date +%Y%m%d).zip"
 (
     cd "$output_dir"
-    zip -r -1 "$WORK_DIR/out/ColorOS15_${device_code}_$(date +%Y%m%d).zip" ./*
+    run_logged_task REPACK "Create flashable ZIP" "$output_archive" zip -r -1 "$output_archive" ./*
 )
 output_zip=$(find "$WORK_DIR/out" -maxdepth 1 -type f -name '*.zip' -print -quit)
 printf '%s\n' "$(basename "$output_zip")" > "$WORK_DIR/bin/ddevice/output_zip.txt"

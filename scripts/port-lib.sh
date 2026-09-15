@@ -1,7 +1,53 @@
 #!/usr/bin/env bash
 
-log() { printf '[%s] %s\n' "$1" "$2"; }
+log() { printf '%(%H:%M:%S)T [%s] %s\n' -1 "$1" "$2"; }
 die() { log ERROR "$1" >&2; exit 1; }
+
+phase() {
+    printf '\n========== %s ==========\n' "$1"
+}
+
+path_size() {
+    local path="$1"
+    [[ -e "$path" ]] || { printf '0'; return; }
+    du -sh "$path" 2>/dev/null | awk '{print $1}'
+}
+
+run_logged_task() {
+    local category="$1" label="$2" watch_path="$3"
+    shift 3
+    local log_dir="${WORK_DIR:-$(pwd)}/build/task-logs"
+    mkdir -p "$log_dir"
+    local task_log
+    task_log=$(mktemp "$log_dir/task.XXXXXX.log")
+    local started=$SECONDS pid status=0 elapsed next_report=30
+
+    log "$category" "START $label"
+    "$@" >"$task_log" 2>&1 &
+    pid=$!
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep 2
+        elapsed=$((SECONDS - started))
+        if kill -0 "$pid" 2>/dev/null && ((elapsed >= next_report)); then
+            local disk_path="$watch_path" free_space
+            [[ -e "$disk_path" ]] || disk_path=$(dirname "$disk_path")
+            [[ -e "$disk_path" ]] || disk_path="${WORK_DIR:-$(pwd)}"
+            free_space=$(df -h "$disk_path" 2>/dev/null | awk 'NR==2 {print $4}' || true)
+            log "$category" "RUNNING $label (${elapsed}s, data=$(path_size "$watch_path"), free=${free_space:-unknown})"
+            next_report=$((next_report + 30))
+        fi
+    done
+    wait "$pid" || status=$?
+    elapsed=$((SECONDS - started))
+    if ((status != 0)); then
+        log ERROR "$label failed (exit $status); last tool output:"
+        tail -n 100 "$task_log" >&2 || true
+        rm -f "$task_log"
+        return "$status"
+    fi
+    rm -f "$task_log"
+    log "$category" "DONE $label (${elapsed}s, data=$(path_size "$watch_path"))"
+}
 
 bool() {
     case "${1,,}" in true|1|yes|y|on) return 0 ;; *) return 1 ;; esac
@@ -82,15 +128,16 @@ extract_payload_rom() {
     # in the background and emit a periodic heartbeat for Actions and Telegram
     # diagnosis instead of appearing frozen for hours.
     payload-extract "${extract_args[@]}" &
-    local extract_pid=$! elapsed=0
+    local extract_pid=$! extract_started=$SECONDS elapsed=0 next_report=30
     while kill -0 "$extract_pid" 2>/dev/null; do
-        sleep 30
-        if kill -0 "$extract_pid" 2>/dev/null; then
-            elapsed=$((elapsed + 30))
+        sleep 5
+        elapsed=$((SECONDS - extract_started))
+        if kill -0 "$extract_pid" 2>/dev/null && ((elapsed >= next_report)); then
             local image_size free_space
             image_size=$(du -sh "$destination/images" 2>/dev/null | awk '{print $1}')
             free_space=$(df -h "$destination" | awk 'NR==2 {print $4}')
             log UNPACK "$label still extracting (${elapsed}s, images=${image_size:-0}, free=${free_space:-unknown})"
+            next_report=$((next_report + 30))
         fi
     done
     wait "$extract_pid" || {
@@ -103,17 +150,52 @@ extract_payload_rom() {
 extract_image() {
     local image="$1" destination="$2"
     [[ -f "$image" ]] || return 0
-    local type
+    local type partition input_size
     type=$(gettype -i "$image")
+    partition=$(basename "$image" .img)
+    input_size=$(path_size "$image")
     case "$type" in
         ext)
-            python3 "$WORK_DIR/bin/imgextractor/imgextractor.py" "$image" "$destination" >/dev/null
+            run_logged_task UNPACK "$partition.img ($type, $input_size)" "$destination/$partition" \
+                python3 "$WORK_DIR/bin/imgextractor/imgextractor.py" "$image" "$destination"
             ;;
         erofs)
-            extract.erofs -x -i "$image" -o "$destination" >/dev/null
+            run_logged_task UNPACK "$partition.img ($type, $input_size)" "$destination/$partition" \
+                extract.erofs -x -i "$image" -o "$destination" -f -s
             ;;
         *) die "Unsupported filesystem for $(basename "$image"): $type" ;;
     esac
+    rm -f "$image"
+}
+
+extract_metadata_image() {
+    local image="$1" destination="$2"
+    shift 2
+    [[ -f "$image" ]] || return 0
+    local type partition target extracted=0
+    type=$(gettype -i "$image")
+    partition=$(basename "$image" .img)
+    if [[ "$type" != erofs ]]; then
+        log UNPACK "$partition.img is $type; selective extraction unavailable, using full extraction"
+        extract_image "$image" "$destination"
+        return
+    fi
+    for target in "$@"; do
+        if run_logged_task UNPACK "$partition.img metadata $target" "$destination/$partition" \
+            extract.erofs -i "$image" -o "$destination" -X "$target" -f -s; then
+            extracted=1
+        else
+            log WARN "$partition.img does not expose optional metadata path $target"
+        fi
+    done
+    rm -f "$image"
+    ((extracted == 1)) || log WARN "No optional metadata extracted from $partition.img"
+}
+
+remove_tree() {
+    local path="$1" label="$2"
+    [[ -e "$path" ]] || return 0
+    run_logged_task PORT "$label" "$(dirname "$path")" rm -rf "$path"
 }
 
 copy_tree() {

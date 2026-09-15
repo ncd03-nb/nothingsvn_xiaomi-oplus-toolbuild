@@ -45,17 +45,19 @@ done
 rm -rf "$WORK_DIR/build" "$WORK_DIR/downloads" "$WORK_DIR/out"
 mkdir -p "$WORK_DIR/build/baserom/images" "$WORK_DIR/build/portrom/images" "$WORK_DIR/downloads"
 
+phase "DOWNLOAD ROM FILES"
 notify download "$REPO_NAME" "$BASE_ROM" "$PREFIX_ID" "$BUILDER_NAME" "$BUILDER_ID"
 obtain_rom "$BASE_ROM" "Xiaomi base ROM" "$WORK_DIR/downloads/base.zip"
 obtain_rom "$OPLUS_ROM" "OPlus port ROM" "$WORK_DIR/downloads/oplus.zip"
 
+phase "UNPACK OTA PAYLOADS"
 notify unpack "$REPO_NAME" "$BASE_ROM" "$PREFIX_ID" "$BUILDER_NAME" "$BUILDER_ID"
 extract_payload_rom "$WORK_DIR/downloads/base.zip" "$WORK_DIR/build/baserom" "Xiaomi base ROM"
 rm -f "$WORK_DIR/downloads/base.zip"
 # Only OPlus framework/compatibility partitions are consumed below. Extracting
 # every firmware and boot partition from a 60+ partition payload wastes runner
 # disk and can leave payload-extract doing hours of unnecessary I/O.
-OPLUS_PARTITIONS="system,product,system_ext,vendor,odm,my_product,my_engineering,my_stock,my_carrier,my_region,my_bigball,my_heytap,my_manifest"
+OPLUS_PARTITIONS="system,product,system_ext,vendor,my_product,my_engineering,my_stock,my_carrier,my_region,my_bigball,my_heytap,my_manifest"
 extract_payload_rom "$WORK_DIR/downloads/oplus.zip" "$WORK_DIR/build/portrom" "OPlus port ROM" "$OPLUS_PARTITIONS"
 rm -f "$WORK_DIR/downloads/oplus.zip"
 
@@ -72,7 +74,8 @@ if [[ -f "$base_super" ]]; then
     stat -c%s "$base_super" > "$WORK_DIR/bin/ddevice/superSize.txt"
 fi
 
-log UNPACK "Extracting Xiaomi hardware partitions"
+phase "UNPACK XIAOMI HARDWARE"
+log UNPACK "Extracting Xiaomi partitions that remain in the port"
 for candidate in system product system_ext vendor; do
     if [[ -f "$base_images/$candidate.img" ]]; then
         fs_type=$(gettype -i "$base_images/$candidate.img")
@@ -81,10 +84,17 @@ for candidate in system product system_ext vendor; do
         break
     fi
 done
-for part in system product system_ext vendor odm mi_ext; do
+for part in vendor odm mi_ext; do
     [[ -f "$base_images/$part.img" ]] && extract_image "$base_images/$part.img" "$base_images"
 done
 
+# system/product/system_ext are replaced by OPlus. Read only the small Xiaomi
+# metadata needed for detection instead of expanding and later deleting them.
+extract_metadata_image "$base_images/system.img" "$base_images" /system/build.prop
+extract_metadata_image "$base_images/product.img" "$base_images" /etc/build.prop /etc/device_features
+rm -f "$base_images/system_ext.img"
+
+phase "DETECT XIAOMI DEVICE"
 device_json="$WORK_DIR/build/device.json"
 python3 "$WORK_DIR/scripts/detect-device.py" \
     --root "$base_images" \
@@ -121,12 +131,18 @@ export ENABLE_VNDK_APEX ENABLE_BLUETOOTH_QTI_FIX EXTRAS_DIR
 [[ "$SUPER_SIZE" =~ ^[0-9]+$ ]] || die "Could not derive super size from Xiaomi payload dynamic-partition metadata"
 log DETECT "Device=$DEVICE_NAME codename=$DEVICE_CODENAME SoC=${SOC_MODEL:-unknown} first_api=$FIRST_API_LEVEL super=$SUPER_SIZE"
 
+phase "UNPACK OPLUS FRAMEWORK"
 log UNPACK "Extracting OPlus framework and compatibility data"
-for part in system product system_ext vendor odm my_product my_engineering my_stock my_carrier my_region my_bigball my_heytap my_manifest; do
+for part in system product system_ext my_product my_engineering my_stock my_carrier my_region my_bigball my_heytap my_manifest; do
     [[ -f "$port_images/$part.img" ]] && extract_image "$port_images/$part.img" "$port_images"
 done
+# Only passwd/group are consumed from the OPlus vendor. Avoid expanding its
+# camera, audio and firmware trees that will never enter the final ROM.
+extract_metadata_image "$port_images/vendor.img" "$port_images" /etc/passwd /etc/group
 
 export BASE_IMAGES="$base_images" PORT_IMAGES="$port_images"
+phase "COMPOSE OPLUS PORT"
+notify build "$REPO_NAME" "$BASE_ROM" "$PREFIX_ID" "$BUILDER_NAME" "$BUILDER_ID"
 bash "$WORK_DIR/scripts/apply-oplus-port.sh"
 
 # Metadata used by packROM.sh, uploadROM.sh and notify.py.
@@ -150,7 +166,6 @@ else
 fi
 bash "$WORK_DIR/bin/ddevice/genInstall.sh"
 
-notify build "$REPO_NAME" "$BASE_ROM" "$PREFIX_ID" "$BUILDER_NAME" "$BUILDER_ID"
 log BUILD "Composition ready for $DEVICE_NAME ($DEVICE_CODENAME)"
 
 if [[ "$LOCAL_BUILD" == y ]]; then

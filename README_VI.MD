@@ -80,6 +80,10 @@ Metadata thiết bị được lấy theo thứ tự: property trong ROM, file X
 `devices/xiaomi.json` cho thông số vật lý không có trong Android (đặc biệt là
 kích thước đường chéo màn hình). Vì vậy lệnh bot vẫn không cần profile thiết bị.
 
+Build log hiển thị riêng từng pha download, unpack payload, unpack từng
+partition, nhận diện thiết bị, port, repack và tạo super/ZIP. Tác vụ dài có
+heartbeat mỗi 30 giây với thời gian, dung lượng đã tạo và ổ đĩa còn trống.
+
 ## Sửa lỗi thực tế đã tích hợp
 
 - SIM 2: đồng bộ `vendor/etc/passwd` và `group` từ OPlus.

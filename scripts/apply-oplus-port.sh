@@ -18,23 +18,27 @@ FIRST_API_LEVEL=${FIRST_API_LEVEL:-$base_first_api}
 log PORT "Keeping Xiaomi vendor/odm/dlkm; importing OPlus framework partitions"
 for part in system product system_ext; do
     [[ -d "$PORT_IMAGES/$part" ]] || continue
-    rm -rf "${BASE_IMAGES:?}/$part"
+    log PORT "Replacing Xiaomi $part with OPlus $part"
+    remove_tree "${BASE_IMAGES:?}/$part" "Remove old Xiaomi $part tree"
     mv "$PORT_IMAGES/$part" "$BASE_IMAGES/$part"
     for suffix in fs_config file_contexts size; do
         [[ -f "$PORT_IMAGES/config/${part}_${suffix}" ]] || continue
         cp -f "$PORT_IMAGES/config/${part}_${suffix}" "$BASE_IMAGES/config/${part}_${suffix}"
     done
+    log PORT "Imported $part ($(path_size "$BASE_IMAGES/$part"))"
 done
 
 require_dir "$BASE_IMAGES/system"
 for part in my_product my_engineering my_stock my_carrier my_region my_bigball my_heytap my_manifest; do
     [[ -d "$PORT_IMAGES/$part" ]] || continue
-    rm -rf "$BASE_IMAGES/system/$part"
+    log PORT "Merging OPlus /$part into system"
+    remove_tree "$BASE_IMAGES/system/$part" "Remove existing /$part tree"
     mv "$PORT_IMAGES/$part" "$BASE_IMAGES/system/$part"
     merge_config "$PORT_IMAGES/config/${part}_fs_config" "$BASE_IMAGES/config/system_fs_config"
     merge_config "$PORT_IMAGES/config/${part}_file_contexts" "$BASE_IMAGES/config/system_file_contexts"
 done
 
+log PORT "Adding OPlus build.prop imports"
 system_prop="$BASE_IMAGES/system/system/build.prop"
 require_file "$system_prop"
 for part in my_bigball my_carrier my_engineering my_heytap my_manifest my_product my_region my_stock; do
@@ -44,6 +48,7 @@ done
 
 # SIM2 and OPlus account services expect OPlus passwd/group entries. The rest of
 # the vendor remains the Xiaomi stock vendor for hardware compatibility.
+log PORT "Synchronizing OPlus passwd/group for SIM2 and account services"
 if [[ -f "$PORT_IMAGES/vendor/etc/passwd" ]]; then
     cp -f "$PORT_IMAGES/vendor/etc/passwd" "$BASE_IMAGES/vendor/etc/passwd"
 fi
@@ -60,6 +65,7 @@ for required in DEVICE_CODENAME DEVICE_MODEL DEVICE_NAME; do
     [[ -n "${!required:-}" ]] || die "$required could not be detected from the Xiaomi ROM"
 done
 
+log PORT "Writing detected device properties to Xiaomi ODM"
 if [[ -n "${SOC_MODEL:-}" ]]; then
     set_prop "$odm_prop" ro.build.device_family "OP${SOC_MODEL}"
     set_prop "$odm_prop" ro.product.oplus.cpuinfo "$SOC_MODEL"
@@ -126,6 +132,7 @@ if [[ -f "$my_product_prop" ]]; then
 fi
 
 if [[ -n "${BATTERY_CAPACITY_MAH:-}" ]]; then
+    log PORT "Updating battery capacity to ${BATTERY_CAPACITY_MAH}mAh"
     while IFS= read -r -d '' power_profile; do
         python3 - "$power_profile" "$BATTERY_CAPACITY_MAH" <<'PY'
 from pathlib import Path
@@ -139,6 +146,7 @@ PY
 fi
 
 # Optional AyuGram-derived extras. They are never required for a minimal port.
+log PORT "Applying enabled compatibility assets"
 if bool "${ENABLE_VNDK_APEX:-true}" && [[ -d "$EXTRAS_DIR/system_ext/apex" ]]; then
     copy_tree "$EXTRAS_DIR/system_ext/apex" "$BASE_IMAGES/system_ext/apex"
 fi
@@ -165,6 +173,7 @@ fi
 patch_property_contexts "$BASE_IMAGES" "${PROPERTY_CONTEXT_PATCH_FILE:-}"
 
 # Remove accidental desktop metadata and reject common unsafe placeholder values.
+log PORT "Running final composition validation"
 find "$BASE_IMAGES" -type f \( -name '.DS_Store' -o -name 'Thumbs.db' \) -delete
 grep -Rqs '#add your' "$BASE_IMAGES" && die "Unresolved tutorial placeholder found in build.prop"
 
